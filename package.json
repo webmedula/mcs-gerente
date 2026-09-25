@@ -1,0 +1,29 @@
+{
+  "name": "mcs-gerente",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gerente da MCS: assistente de IA no Telegram que consulta os tres sistemas (ml-analytics, ml-actions, tiny-pedidos-nf) pelas APIs deles. v1 = somente leitura.",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3",
+    "vitest": "^2.1.4"
+  },
+  "license": "ISC"
+}
