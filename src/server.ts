@@ -4,6 +4,7 @@ import { logger } from './logger';
 import { healthRoutes } from './routes/health';
 import { telegramRoutes } from './routes/telegram';
 import { sistemasRoutes } from './routes/sistemas';
+import { diagnosticoRoutes } from './routes/diagnostico';
 
 export function buildServer() {
   const app = Fastify({ logger: false });
@@ -44,6 +45,7 @@ export function buildServer() {
   app.register(healthRoutes);
   app.register(telegramRoutes);
   app.register(sistemasRoutes);
+  app.register(diagnosticoRoutes);
 
   app.setErrorHandler((err, _req, reply) => {
     logger.error('Erro nao tratado:', err.message, err.stack);
