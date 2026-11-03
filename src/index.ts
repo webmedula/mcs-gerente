@@ -2,6 +2,7 @@ import { config } from './config';
 import { logger } from './logger';
 import { buildServer } from './server';
 import { sistemas } from './sistemas';
+import { startAvisoPromocoes } from './avisoPromocoes';
 
 async function main(): Promise<void> {
   const app = buildServer();
@@ -13,6 +14,7 @@ async function main(): Promise<void> {
     if (!s.baseUrl) logger.warn(`[CONFIG] ${s.rotulo} sem URL: as ferramentas dele vao responder erro.`);
     else if (!s.apiKey) logger.warn(`[CONFIG] ${s.rotulo} sem chave: se ele exigir x-api-key, vai recusar.`);
   }
+  startAvisoPromocoes();
   if (!config.serviceApiKey) logger.warn('[SEGURANCA] SERVICE_API_KEY vazia: rotas /debug/* ficam desligadas.');
 }
 

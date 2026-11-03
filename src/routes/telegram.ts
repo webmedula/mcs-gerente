@@ -26,7 +26,7 @@ function permitido(chatId: string): boolean {
   return config.telegramChatIds.length === 0 ? false : config.telegramChatIds.includes(chatId);
 }
 
-async function enviar(chatId: string, texto: string): Promise<void> {
+export async function enviar(chatId: string, texto: string): Promise<void> {
   if (!config.telegramBotToken) return;
   try {
     const res = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
