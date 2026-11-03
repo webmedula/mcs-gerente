@@ -1,6 +1,6 @@
-# mcs-gerente — v1 (2026-09-24)
+# mcs-gerente — v1.1 (2026-11-03)
 
-O **Gerente** é o assistente de IA da MCS no Telegram. Ele consulta os **três sistemas** da
+O **Gerente** é o assistente de IA da MCS no Telegram. Ele consulta os **quatro sistemas** da
 operação pelas APIs de cada um, sem acessar banco de ninguém:
 
 | Sistema | O que o Gerente consulta |
@@ -8,14 +8,17 @@ operação pelas APIs de cada um, sem acessar banco de ninguém:
 | **ml-analytics** (v34+) | resumo, top anúncios, margem, reposição, notas, Buy Box, lacunas de custo, SQL, histórico — as ferramentas vêm do próprio analytics |
 | **ml-actions** | fila de candidatos à recriação, histórico de recriações, diagnóstico de formato |
 | **tiny-pedidos-nf** | pedidos pendentes, prévia do desconto, processados/erros, lotes, vendas do dia, painel, listas de preço |
+| **Central de Ocorrências** (mcs-ocorrencias) | lista de ocorrências por status/canal/responsável, detalhe de um protocolo (histórico, mensagens do ML, devolução, conta da venda), números do período e fila de devoluções |
 | geral | `estado_dos_sistemas`: saúde, versões, logins ML/Tiny, agendador de notas |
 
 ## v1 = somente leitura
 
 A trava está no código (`src/sistemas.ts`), não no comportamento do modelo:
 
-- GET em `/api/*` e `/health` dos três sistemas;
+- GET em `/api/*` e `/health` do ml-analytics, ml-actions e tiny-pedidos-nf;
 - POST **só** em `/api/assistente/ferramenta/:nome` do ml-analytics (ferramentas de leitura);
+- na Central de Ocorrências, só os GET de uma lista fechada (lista, detalhe, devoluções, números,
+  modelos): backup, CSV, anexos, equipe e chaves nem saem do Gerente;
 - qualquer outra coisa é recusada antes de sair do Gerente. Os testes em `src/sistemas.test.ts`
   listam todas as rotas de escrita conhecidas e confirmam que estão bloqueadas.
 
@@ -34,7 +37,10 @@ funciona com ml-actions e tiny-pedidos-nf e avisa que as ferramentas do analytic
    e domínio próprio. Não precisa de volume (o Gerente não guarda dados).
 3. Variáveis: ver `.env.example`. As do assistente e do Telegram são **as mesmas** que estão hoje
    no ml-analytics. As chaves `*_API_KEY` são a `SERVICE_API_KEY` de cada sistema.
-4. Confira `https://SEU-GERENTE/debug/sistemas?key=SUA_SERVICE_API_KEY` — os três devem dar `ok: true`.
+   Para a Central de Ocorrências, a chave **não** é a `SERVICE_API_KEY`: crie uma chave do Gerente IA
+   no painel da Central (só o gerente vê essa tela), e coloque em `OCORRENCIAS_API_KEY` junto com
+   `OCORRENCIAS_BASE_URL`. Sem elas o Gerente funciona normalmente, só sem ocorrências.
+4. Confira `https://SEU-GERENTE/debug/sistemas?key=SUA_SERVICE_API_KEY` — os quatro devem dar `ok: true`.
 5. Confira `https://SEU-GERENTE/debug/assistente?key=...` — provedor, modelo e ferramentas por sistema.
 6. Teste sem Telegram: `https://SEU-GERENTE/debug/perguntar?key=...&q=quanto+vendemos+ontem`.
 
@@ -58,12 +64,16 @@ O bot é o mesmo; só muda para onde o Telegram entrega as mensagens.
 
 ```bash
 npm install
-npm test        # 24 testes, sem chamar nenhum sistema real
+npm test        # 30 testes, sem chamar nenhum sistema real
 npm run dev
 ```
 
 ## Histórico de versões
 
+- **v1.1 (2026-11-03)** — Central de Ocorrências como quarto sistema, somente leitura: ferramentas
+  `ocorrencias_lista`, `ocorrencias_detalhe`, `ocorrencias_numeros` e `ocorrencias_devolucoes`; chave
+  enviada como Bearer; lista fechada de rotas GET; e-mail, telefone e dados crus do Tiny não vão pro
+  modelo; a Central entra no `estado_dos_sistemas`, no `/debug/sistemas` e no diagnóstico.
 - **v1 (2026-09-24)** — primeira versão. Bot migrado do ml-analytics v33, agora consultando os três
   sistemas; somente leitura; ferramentas do analytics buscadas em tempo de execução; chamadas de um
   mesmo passo em paralelo; data de hoje (Brasília) no contexto do modelo; resultado grande cortado

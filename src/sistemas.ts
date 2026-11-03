@@ -1,7 +1,7 @@
 import { config } from './config';
 
 /**
- * CLIENTE DOS TRES SISTEMAS DA MCS.
+ * CLIENTE DOS QUATRO SISTEMAS DA MCS.
  *
  * v1 e SOMENTE LEITURA, e isso nao depende do modelo "se comportar": a trava esta aqui.
  * - GET em qualquer rota /api/ ou /health.
@@ -9,29 +9,59 @@ import { config } from './config';
  *   existe porque a entrada pode ser um SQL longo).
  * Qualquer outra combinacao e recusada ANTES de sair da maquina. Quando a fase 2 (acoes com
  * confirmacao) chegar, ela entra por uma lista explicita de rotas de escrita, nao afrouxando isto.
+ *
+ * Central de Ocorrencias (mcs-ocorrencias): alem da trava geral, so passam os GET da lista
+ * GET_PERMITIDO abaixo. La tem rotas GET que baixam backup, CSV com dados pessoais e anexos; a
+ * Central ja recusa a chave da IA nelas, mas aqui elas nem saem do Gerente.
  */
 
-export type NomeSistema = 'analytics' | 'actions' | 'nf';
+export type NomeSistema = 'analytics' | 'actions' | 'nf' | 'ocorrencias';
 
 export interface Sistema {
   nome: NomeSistema;
   rotulo: string;
   baseUrl: string;
   apiKey: string;
+  /** Como a chave vai no cabecalho. A Central usa Bearer (chave mcsia_ criada no painel dela). */
+  autenticacao: 'x-api-key' | 'bearer';
+  /** Rota aberta de saude (a Central usa /healthz). */
+  rotaSaude: string;
 }
 
 export function sistemas(): Record<NomeSistema, Sistema> {
   return {
-    analytics: { nome: 'analytics', rotulo: 'ml-analytics', baseUrl: config.analyticsBaseUrl, apiKey: config.analyticsApiKey },
-    actions: { nome: 'actions', rotulo: 'ml-actions', baseUrl: config.actionsBaseUrl, apiKey: config.actionsApiKey },
-    nf: { nome: 'nf', rotulo: 'tiny-pedidos-nf', baseUrl: config.nfBaseUrl, apiKey: config.nfApiKey },
+    analytics: { nome: 'analytics', rotulo: 'ml-analytics', baseUrl: config.analyticsBaseUrl, apiKey: config.analyticsApiKey, autenticacao: 'x-api-key', rotaSaude: '/health' },
+    actions: { nome: 'actions', rotulo: 'ml-actions', baseUrl: config.actionsBaseUrl, apiKey: config.actionsApiKey, autenticacao: 'x-api-key', rotaSaude: '/health' },
+    nf: { nome: 'nf', rotulo: 'tiny-pedidos-nf', baseUrl: config.nfBaseUrl, apiKey: config.nfApiKey, autenticacao: 'x-api-key', rotaSaude: '/health' },
+    ocorrencias: { nome: 'ocorrencias', rotulo: 'Central de Ocorrencias', baseUrl: config.ocorrenciasBaseUrl, apiKey: config.ocorrenciasApiKey, autenticacao: 'bearer', rotaSaude: '/healthz' },
   };
+}
+
+/** Cabecalho com a chave, no formato que cada sistema espera. */
+export function cabecalhoDaChave(s: Sistema): Record<string, string> {
+  if (!s.apiKey) return {};
+  return s.autenticacao === 'bearer' ? { authorization: `Bearer ${s.apiKey}` } : { 'x-api-key': s.apiKey };
 }
 
 const POST_PERMITIDO: Record<NomeSistema, RegExp[]> = {
   analytics: [/^\/api\/assistente\/ferramenta\/[a-z0-9_]+$/],
   actions: [],
   nf: [],
+  ocorrencias: [],
+};
+
+/** Sistemas com lista fechada de GET. Quem nao esta aqui aceita qualquer GET em /api/. */
+const PROTOCOLO = '[A-Za-z0-9-]{4,40}';
+const GET_PERMITIDO: Partial<Record<NomeSistema, RegExp[]>> = {
+  ocorrencias: [
+    /^\/healthz$/,
+    /^\/api\/admin\/me$/,
+    /^\/api\/admin\/ocorrencias$/,
+    new RegExp(`^/api/admin/ocorrencias/${PROTOCOLO}$`),
+    /^\/api\/admin\/devolucoes$/,
+    /^\/api\/admin\/estatisticas$/,
+    /^\/api\/admin\/modelos$/,
+  ],
 };
 
 export class RequisicaoRecusada extends Error {}
@@ -39,9 +69,11 @@ export class RequisicaoRecusada extends Error {}
 /** A trava de leitura. Exportada pra ser testada isoladamente. */
 export function requisicaoPermitida(sistema: NomeSistema, metodo: string, caminho: string): boolean {
   const semQuery = caminho.split('?')[0];
-  if (!semQuery.startsWith('/api/') && semQuery !== '/health') return false;
   // Sem ".." nem barra dupla: o caminho e montado com entrada do modelo (ex.: id do pedido).
   if (semQuery.includes('..') || semQuery.includes('//')) return false;
+  const listaGet = GET_PERMITIDO[sistema];
+  if (listaGet) return metodo === 'GET' && listaGet.some((re) => re.test(semQuery));
+  if (!semQuery.startsWith('/api/') && semQuery !== '/health') return false;
   if (metodo === 'GET') return true;
   if (metodo === 'POST') return POST_PERMITIDO[sistema].some((re) => re.test(semQuery));
   return false;
@@ -68,8 +100,7 @@ export async function chamar(
     throw new ErroDoSistema(`${s.rotulo} nao configurado no Gerente (falta a URL base).`);
   }
 
-  const headers: Record<string, string> = { accept: 'application/json' };
-  if (s.apiKey) headers['x-api-key'] = s.apiKey;
+  const headers: Record<string, string> = { accept: 'application/json', ...cabecalhoDaChave(s) };
   if (opcoes.corpo !== undefined) headers['content-type'] = 'application/json';
 
   let res: Response;
@@ -94,7 +125,8 @@ export async function chamar(
   }
 
   if (res.status === 401) throw new ErroDoSistema(`${s.rotulo} recusou a chave (401). Confira a chave dele no Gerente.`, 401);
-  if (!res.ok) throw new ErroDoSistema(corpo?.mensagem || `${s.rotulo} respondeu HTTP ${res.status}.`, res.status);
+  if (res.status === 403 && nome === 'ocorrencias') throw new ErroDoSistema(`${s.rotulo}: essa consulta e so para pessoas logadas no painel, a chave da IA nao tem acesso.`, 403);
+  if (!res.ok) throw new ErroDoSistema(corpo?.mensagem || corpo?.erro || `${s.rotulo} respondeu HTTP ${res.status}.`, res.status);
   return corpo;
 }
 
