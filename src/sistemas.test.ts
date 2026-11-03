@@ -52,4 +52,23 @@ describe('limitarResultado', () => {
     expect(r.aviso).toContain('incompleta');
     expect(r.parcial).toHaveLength(100);
   });
+
+  it('Central de Ocorrencias: so os GET da lista, nada de escrita, backup, CSV ou anexo', () => {
+    const ok = [
+      '/healthz', '/api/admin/me', '/api/admin/ocorrencias?status=nova', '/api/admin/ocorrencias/MCS-20261101-AB12',
+      '/api/admin/devolucoes', '/api/admin/estatisticas?dias=30', '/api/admin/modelos',
+    ];
+    for (const c of ok) expect(requisicaoPermitida('ocorrencias', 'GET', c)).toBe(true);
+    const bloqueados = [
+      '/api/admin/backups', '/api/admin/backups/banco.db', '/api/admin/backups/fotos.tar.gz', '/api/admin/ocorrencias.csv',
+      '/api/admin/anexos/1', '/api/admin/usuarios', '/api/admin/chaves', '/api/admin/registro',
+      '/api/admin/ocorrencias/MCS-1/exportar', '/api/admin/ocorrencias/MCS-1/ml/financeiro-bruto', '/health', '/api/ocorrencias',
+    ];
+    for (const c of bloqueados) expect(requisicaoPermitida('ocorrencias', 'GET', c)).toBe(false);
+    for (const m of ['POST', 'PATCH', 'DELETE', 'PUT']) {
+      expect(requisicaoPermitida('ocorrencias', m, '/api/admin/ocorrencias/MCS-1/status')).toBe(false);
+      expect(requisicaoPermitida('ocorrencias', m, '/api/admin/ocorrencias')).toBe(false);
+    }
+  });
 });
+

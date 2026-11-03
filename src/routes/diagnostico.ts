@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { FastifyInstance } from 'fastify';
-import { NomeSistema, sistemas } from '../sistemas';
+import { cabecalhoDaChave, NomeSistema, sistemas } from '../sistemas';
 
 /**
  * DIAGNOSTICO — pra investigar o 401 intermitente do tiny-pedidos-nf.
@@ -18,7 +18,7 @@ export async function diagnosticoRoutes(app: FastifyInstance): Promise<void> {
     const s = sistemas()[nome];
     if (!s) {
       reply.code(404);
-      return { mensagem: `Sistema desconhecido: ${nome}. Use analytics, actions ou nf.` };
+      return { mensagem: `Sistema desconhecido: ${nome}. Use analytics, actions, nf ou ocorrencias.` };
     }
     if (!s.baseUrl) return { mensagem: `${s.rotulo} sem URL configurada.` };
 
@@ -26,6 +26,7 @@ export async function diagnosticoRoutes(app: FastifyInstance): Promise<void> {
       nf: ['/health', '/api/scheduler', '/api/orders/pending', `/api/sales-report?data=${dataDeHoje()}`, '/api/dashboard?dias=1'],
       analytics: ['/health', '/api/assistente/ferramentas'],
       actions: ['/health', '/api/status'],
+      ocorrencias: ['/healthz', '/api/admin/me'],
     };
 
     const cabecalhosDeInteresse = ['server', 'x-powered-by', 'age', 'x-cache', 'cf-cache-status', 'via', 'cache-control'];
@@ -36,7 +37,7 @@ export async function diagnosticoRoutes(app: FastifyInstance): Promise<void> {
         const inicio = Date.now();
         try {
           const res = await fetch(`${s.baseUrl}${caminho}`, {
-            headers: s.apiKey ? { 'x-api-key': s.apiKey, accept: 'application/json' } : { accept: 'application/json' },
+            headers: { accept: 'application/json', ...cabecalhoDaChave(s) },
             signal: AbortSignal.timeout(15000),
           });
           const texto = await res.text();

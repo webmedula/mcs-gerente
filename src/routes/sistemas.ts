@@ -1,11 +1,11 @@
 import { FastifyInstance } from 'fastify';
-import { chamar, sistemas } from '../sistemas';
+import { chamar, NomeSistema, sistemas } from '../sistemas';
 
 export async function sistemasRoutes(app: FastifyInstance): Promise<void> {
   /** Testa pelo navegador se o Gerente alcanca cada sistema COM a chave certa. */
   app.get('/debug/sistemas', async () => {
     const s = sistemas();
-    const testar = async (nome: 'analytics' | 'actions' | 'nf', caminho: string) => {
+    const testar = async (nome: NomeSistema, caminho: string) => {
       const inicio = Date.now();
       try {
         await chamar(nome, caminho, { timeoutMs: 10000 });
@@ -15,11 +15,12 @@ export async function sistemasRoutes(app: FastifyInstance): Promise<void> {
       }
     };
     // Rotas /api/ de proposito: /health e aberta e nao provaria que a chave esta certa.
-    const [a, ac, nf] = await Promise.all([
+    const [a, ac, nf, oc] = await Promise.all([
       testar('analytics', '/api/assistente/ferramentas'),
       testar('actions', '/api/status'),
       testar('nf', '/api/scheduler'),
+      testar('ocorrencias', '/api/admin/me'),
     ]);
-    return { [s.analytics.rotulo]: a, [s.actions.rotulo]: ac, [s.nf.rotulo]: nf };
+    return { [s.analytics.rotulo]: a, [s.actions.rotulo]: ac, [s.nf.rotulo]: nf, [s.ocorrencias.rotulo]: oc };
   });
 }

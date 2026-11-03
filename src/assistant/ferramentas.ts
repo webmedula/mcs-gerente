@@ -5,11 +5,11 @@ import { logger } from '../logger';
  * FERRAMENTAS DO GERENTE (v1 — somente leitura).
  *
  * Mesmo principio do bot antigo: a IA nao ve os dados, ela escolhe uma funcao e recebe o
- * resultado pronto. Todo numero que chega ao usuario saiu de um dos tres sistemas.
+ * resultado pronto. Todo numero que chega ao usuario saiu de um dos sistemas.
  *
  * - ml-analytics: as ferramentas NAO ficam aqui. O Gerente pergunta ao analytics quais existem
  *   (GET /api/assistente/ferramentas) e pede pra executar. Ferramenta nova la aparece aqui sozinha.
- * - ml-actions e tiny-pedidos-nf: as ferramentas ficam aqui e chamam as rotas GET que os paineis
+ * - ml-actions, tiny-pedidos-nf e Central de Ocorrencias: as ferramentas ficam aqui e chamam as rotas GET que os paineis
  *   deles ja usam. Cada uma resume a resposta — lista crua de 300 pedidos nao cabe no contexto.
  */
 
@@ -51,7 +51,7 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
     definicao: {
       name: 'estado_dos_sistemas',
       description:
-        'Saude dos tres sistemas da MCS: se estao no ar, versao de cada um, se o login no Mercado Livre e no ' +
+        'Saude dos sistemas da MCS (ml-analytics, ml-actions, tiny-pedidos-nf e Central de Ocorrencias): se estao no ar, versao de cada um, se o login no Mercado Livre e no ' +
         'Tiny esta valido, se a escrita do ml-actions esta ligada e como esta o agendador automatico de notas ' +
         '(ligado, intervalo, ultima e proxima execucao). Use quando perguntarem se algo esta funcionando, ' +
         'ou quando outra ferramenta falhar e for preciso entender por que.',
@@ -66,7 +66,7 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
         }
       };
       const s = sistemas();
-      const [aHealth, acHealth, acStatus, nfHealth, nfTiny, nfMl, nfAgenda] = await Promise.all([
+      const [aHealth, acHealth, acStatus, nfHealth, nfTiny, nfMl, nfAgenda, ocHealth, ocChave] = await Promise.all([
         tentar(() => chamar('analytics', '/health')),
         tentar(() => chamar('actions', '/health')),
         tentar(() => chamar('actions', '/api/status')),
@@ -74,11 +74,14 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
         tentar(() => chamar('nf', '/api/oauth/status')),
         tentar(() => chamar('nf', '/api/oauth/ml/status')),
         tentar(() => chamar('nf', '/api/scheduler')),
+        tentar(() => chamar('ocorrencias', '/healthz')),
+        tentar(() => chamar('ocorrencias', '/api/admin/me')),
       ]);
       return {
         [s.analytics.rotulo]: { health: aHealth },
         [s.actions.rotulo]: { health: acHealth, status: acStatus },
         [s.nf.rotulo]: { health: nfHealth, loginTiny: nfTiny, loginMercadoLivre: nfMl, agendadorDeNotas: nfAgenda },
+        [s.ocorrencias.rotulo]: { health: ocHealth, chaveDoGerente: ocChave },
       };
     },
   },
@@ -392,6 +395,212 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
       return chamar('nf', '/api/price-lists');
     },
   },
+
+  // ---------------------------------------------------------------- Central de Ocorrencias
+  {
+    sistema: 'ocorrencias',
+    definicao: {
+      name: 'ocorrencias_lista',
+      description:
+        'Ocorrencias de clientes na Central de Ocorrencias (reclamacoes do formulario e do Mercado Livre): ' +
+        'quantas ha em cada status, e a lista filtrada, mais recentes primeiro, com protocolo, canal, pedido, ' +
+        'assunto, status, responsavel, prazo do ML, devolucao e pendencia com o ML. Use para "quantas ' +
+        'reclamacoes abertas", "o que esta sem responsavel", "ocorrencias do pedido X" ou "do cliente Y".',
+      input_schema: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['nova', 'em_analise', 'aguardando_cliente', 'resolvida', 'abertas'], description: '"abertas" = tudo que nao esta resolvido' },
+          canal: { type: 'string', enum: ['mercado_livre', 'shopee', 'tiktok_shop', 'loja_propria'] },
+          origem: { type: 'string', enum: ['ml', 'formulario'], description: 'ml = reclamacao aberta no Mercado Livre; formulario = cliente abriu pelo site' },
+          pendencia: { type: 'string', enum: ['aguardando', 'creditou', 'negou', 'alguma'], description: 'pendencia de reembolso/credito com o Mercado Livre' },
+          semResponsavel: { type: 'boolean', description: 'so as que ninguem da equipe assumiu' },
+          busca: { type: 'string', description: 'protocolo, numero do pedido ou nome do cliente' },
+          limite: { type: 'integer', description: 'quantas listar (1 a 20, padrao 10)' },
+        },
+      },
+    },
+    async executar(entrada) {
+      const q = new URLSearchParams();
+      const abertas = entrada?.status === 'abertas';
+      if (typeof entrada?.status === 'string' && !abertas) q.set('status', entrada.status);
+      for (const k of ['canal', 'origem', 'pendencia'] as const) if (typeof entrada?.[k] === 'string') q.set(k, entrada[k]);
+      if (entrada?.semResponsavel) q.set('responsavel', 'nenhum');
+      if (typeof entrada?.busca === 'string' && entrada.busca.trim()) q.set('q', entrada.busca.trim().slice(0, 80));
+      const limite = limitar(entrada?.limite, 10);
+      const qs = q.toString();
+      const r = await chamar('ocorrencias', `/api/admin/ocorrencias${qs ? `?${qs}` : ''}`);
+      let itens: any[] = r?.itens ?? [];
+      // A Central nao tem filtro "abertas": tira as resolvidas da pagina (25 por pagina, mais recentes).
+      if (abertas) itens = itens.filter((i) => i.status !== 'resolvida');
+      const contagem: Record<string, number> = r?.contagem ?? {};
+      return {
+        contagemGeralPorStatus: contagem,
+        abertasNoTotal: Object.entries(contagem).filter(([k]) => k !== 'resolvida').reduce((t, [, n]) => t + Number(n), 0),
+        pendenciasComMlAguardando: r?.pendencias,
+        totalNoFiltro: abertas ? undefined : r?.total,
+        observacao: abertas && Number(r?.total) > itens.length
+          ? 'Filtro "abertas" olha so as 25 ocorrencias mais recentes; use status especifico para a contagem exata.'
+          : undefined,
+        itens: itens.slice(0, limite).map((i) => ({
+          protocolo: i.protocolo,
+          origem: i.origem,
+          canal: r?.canais?.[i.canal] ?? i.canal,
+          pedido: i.pedido,
+          assunto: r?.tipos?.[i.tipo] ?? i.tipo,
+          cliente: i.nome,
+          status: r?.status?.[i.status] ?? i.status,
+          responsavel: i.responsavel ?? null,
+          prazoMl: i.prazo_em ?? undefined,
+          devolucao: i.devolucao ?? undefined,
+          pendenciaMl: i.pendencia_ml && i.pendencia_ml !== 'nenhuma' ? i.pendencia_ml : undefined,
+          produto: i.produto?.titulo ?? undefined,
+          abertaEm: i.criado_em,
+          atualizadaEm: i.atualizado_em,
+        })),
+      };
+    },
+  },
+  {
+    sistema: 'ocorrencias',
+    definicao: {
+      name: 'ocorrencias_detalhe',
+      description:
+        'Tudo sobre UMA ocorrencia pelo protocolo: o que o cliente relatou, status, responsavel, produto, ' +
+        'historico (ultimas anotacoes e respostas), mensagens da reclamacao no Mercado Livre, devolucao, ' +
+        'desfecho e custo, conta da venda no ML e pesquisa de satisfacao. Se so tiver o numero do pedido, ' +
+        'ache o protocolo antes com ocorrencias_lista (busca).',
+      input_schema: {
+        type: 'object',
+        properties: { protocolo: { type: 'string', description: 'protocolo da ocorrencia' } },
+        required: ['protocolo'],
+      },
+    },
+    async executar(entrada) {
+      const protocolo = String(entrada?.protocolo || '').trim().toUpperCase();
+      if (!/^[A-Z0-9-]{4,40}$/.test(protocolo)) return { erro: 'Informe o protocolo da ocorrencia (letras, numeros e hifen).' };
+      const o = await chamar('ocorrencias', `/api/admin/ocorrencias/${protocolo}`);
+      const ultimos = <T>(l: T[] | undefined, n: number) => (Array.isArray(l) ? l.slice(-n) : []);
+      const claim = o?.ml?.claim;
+      return {
+        protocolo: o?.protocolo,
+        origem: o?.origem,
+        canal: o?.canal,
+        pedido: o?.pedido,
+        assunto: o?.tipo,
+        status: o?.status,
+        cliente: o?.nome,
+        relato: typeof o?.descricao === 'string' ? o.descricao.slice(0, 1500) : o?.descricao,
+        abertaEm: o?.criado_em,
+        atualizadaEm: o?.atualizado_em,
+        resolvidaEm: o?.resolvida_em,
+        prazoMl: o?.prazo_em,
+        responsavel: o?.responsavel?.nome ?? null,
+        desfecho: o?.desfecho,
+        custo: o?.custo_centavos != null ? o.custo_centavos / 100 : null,
+        produtos: (o?.produtos ?? []).map((p: any) => p?.titulo ?? p?.descricao ?? p?.codigo),
+        fotosDoCliente: Array.isArray(o?.anexos) ? o.anexos.length : 0,
+        historico: ultimos(o?.eventos, 10).map((e: any) => ({
+          em: e.criado_em, autor: e.do_cliente ? 'cliente' : e.autor ?? 'sistema', publico: !!e.publico, texto: String(e.texto ?? '').slice(0, 500),
+        })),
+        historicoTotal: o?.eventos?.length ?? 0,
+        mercadoLivre: o?.ml
+          ? {
+              etapa: claim?.stage, statusReclamacao: claim?.status, motivo: claim?.reason_id, encerrada: o.ml.encerrada,
+              resolucao: claim?.resolution ?? undefined,
+              mensagens: ultimos(o.ml.mensagens, 8).map((m: any) => ({
+                em: m.data, de: m.remetente, para: m.destinatario, texto: String(m.texto ?? '').slice(0, 500),
+              })),
+              mensagensTotal: o.ml.mensagens?.length ?? 0,
+            }
+          : undefined,
+        devolucao: o?.devolucao
+          ? {
+              status: o.devolucao.statusRotulo, tipo: o.devolucao.tipo, envio: o.devolucao.envio, datas: o.devolucao.datas,
+              conferencia: o.devolucao.conferenciaRotulo, conferenciaObs: o.devolucao.conferenciaObs,
+              custos: o.devolucao.custos, contestacao: o.devolucao.contestacao?.status ? o.devolucao.contestacao : undefined,
+            }
+          : undefined,
+        contaDaVenda: o?.conta
+          ? {
+              preco: o.conta.preco, tarifa: o.conta.tarifa, envios: o.conta.envios, reembolso: o.conta.reembolso,
+              creditos: o.conta.creditos, custoProduto: o.conta.custoProduto, totalMl: o.conta.totalMl, resultado: o.conta.resultado,
+              pendencia: o.conta.pendenciaRotulo, reputacaoAfetada: o.conta.reputacaoAfetada,
+            }
+          : undefined,
+        pesquisa: o?.pesquisa ?? undefined,
+      };
+    },
+  },
+  {
+    sistema: 'ocorrencias',
+    definicao: {
+      name: 'ocorrencias_numeros',
+      description:
+        'Numeros da Central de Ocorrencias num periodo (7, 30, 90 ou 365 dias): total aberto, abertas agora, ' +
+        'resolvidas, tempo medio de primeira resposta e de resolucao (horas), custo das resolucoes por desfecho, ' +
+        'satisfacao dos clientes, divisao por canal, assunto e origem, serie semanal e quanto as reclamacoes ' +
+        'do Mercado Livre custaram (por mes, por produto e por motivo).',
+      input_schema: {
+        type: 'object',
+        properties: { dias: { type: 'integer', enum: [7, 30, 90, 365], description: 'padrao 30' } },
+      },
+    },
+    async executar(entrada) {
+      const dias = [7, 30, 90, 365].includes(Number(entrada?.dias)) ? Number(entrada.dias) : 30;
+      const r = await chamar('ocorrencias', `/api/admin/estatisticas?dias=${dias}`);
+      // Os dicionarios de rotulos so servem pra traduzir as chaves; troca na resposta e tira.
+      const { canais = {}, tipos = {}, desfechos = {}, ...resto } = r ?? {};
+      const rotular = (lista: any[] | undefined, mapa: Record<string, string>) =>
+        Array.isArray(lista) ? lista.map((x) => ({ ...x, k: mapa[x.k] ?? x.k })) : lista;
+      return {
+        ...resto,
+        porCanal: rotular(resto.porCanal, canais),
+        porTipo: rotular(resto.porTipo, tipos),
+        porDesfecho: rotular(resto.porDesfecho, desfechos),
+        contaMl: resto.contaMl ? { ...resto.contaMl, porMotivo: rotular(resto.contaMl.porMotivo, tipos) } : undefined,
+      };
+    },
+  },
+  {
+    sistema: 'ocorrencias',
+    definicao: {
+      name: 'ocorrencias_devolucoes',
+      description:
+        'Fila de devolucoes do Mercado Livre na Central de Ocorrencias, as que pedem acao primeiro ' +
+        '(aguardando liberacao, recebidas a conferir, nao entregues, em contestacao): quantas em cada etapa, ' +
+        'rastreio, conferencia do produto que voltou e custo da devolucao.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          status: {
+            type: 'string',
+            enum: ['aguardando_liberacao', 'liberada', 'em_transito', 'nao_entregue', 'recebida', 'conferida', 'em_contestacao', 'encerrada', 'cancelada'],
+          },
+          busca: { type: 'string', description: 'protocolo, pedido, cliente ou rastreio' },
+          limite: { type: 'integer', description: '1 a 20, padrao 10' },
+        },
+      },
+    },
+    async executar(entrada) {
+      const q = new URLSearchParams();
+      if (typeof entrada?.status === 'string') q.set('status', entrada.status);
+      if (typeof entrada?.busca === 'string' && entrada.busca.trim()) q.set('q', entrada.busca.trim().slice(0, 80));
+      const qs = q.toString();
+      const r = await chamar('ocorrencias', `/api/admin/devolucoes${qs ? `?${qs}` : ''}`);
+      const rotulos: Record<string, string> = r?.status ?? {};
+      return {
+        contagemPorEtapa: Object.fromEntries(Object.entries(r?.contagem ?? {}).map(([k, n]) => [rotulos[k] ?? k, n])),
+        totalNoFiltro: r?.total,
+        itens: (r?.itens ?? []).slice(0, limitar(entrada?.limite, 10)).map((d: any) => ({
+          protocolo: d.protocolo, pedido: d.pedido, cliente: d.nome, produto: d.produto?.titulo,
+          etapa: rotulos[d.status] ?? d.status, tipo: d.tipo, rastreio: d.rastreio, envio: d.envio_status,
+          abertaEm: d.aberta_em, recebidaEm: d.recebida_em, prazoMl: d.prazo_em,
+          conferencia: r?.conferencias?.[d.conferencia] ?? d.conferencia ?? undefined,
+          contestacao: d.contestacao_status ?? undefined, custo: d.custo, responsavel: d.responsavel ?? null,
+        })),
+      };
+    },
+  },
 ];
 
 // ------------------------------------------------------------------ ferramentas do ml-analytics
@@ -438,10 +647,17 @@ export async function catalogo(forcar = false): Promise<CatalogoDeFerramentas> {
     avisos.push(`As ferramentas do ml-analytics estao indisponiveis agora (${erroAnalytics || 'lista vazia'}). ` +
       'Perguntas sobre margem, Buy Box, reposicao e SQL do Mercado Livre nao podem ser respondidas no momento.');
   }
+  // Central de Ocorrencias e opcional: sem URL, as ferramentas dela nem aparecem pro modelo.
+  const semOcorrencias = !sistemas().ocorrencias.baseUrl;
+  if (semOcorrencias) {
+    avisos.push('A Central de Ocorrencias nao esta ligada ao Gerente (falta OCORRENCIAS_BASE_URL). ' +
+      'Perguntas sobre reclamacoes e devolucoes de clientes nao podem ser respondidas por aqui.');
+  }
+  const locais = FERRAMENTAS_LOCAIS.filter((f) => !(semOcorrencias && f.sistema === 'ocorrencias'));
   const porSistema: Record<string, string[]> = { analytics: doAnalytics.map((f) => f.name) };
-  for (const f of FERRAMENTAS_LOCAIS) (porSistema[f.sistema] ??= []).push(f.definicao.name);
+  for (const f of locais) (porSistema[f.sistema] ??= []).push(f.definicao.name);
   return {
-    ferramentas: [...doAnalytics, ...FERRAMENTAS_LOCAIS.map((f) => f.definicao)],
+    ferramentas: [...doAnalytics, ...locais.map((f) => f.definicao)],
     avisos,
     porSistema,
   };

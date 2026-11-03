@@ -8,6 +8,8 @@ process.env.ANALYTICS_BASE_URL = 'http://analytics.test';
 process.env.ACTIONS_BASE_URL = 'http://actions.test';
 process.env.NF_BASE_URL = 'http://nf.test';
 process.env.NF_API_KEY = 'chave-nf';
+process.env.OCORRENCIAS_BASE_URL = 'http://oc.test';
+process.env.OCORRENCIAS_API_KEY = 'mcsia_teste';
 
 const { FERRAMENTAS_LOCAIS, catalogo, executarFerramenta, _limparCacheAnalytics } = await import('./ferramentas');
 
@@ -129,5 +131,62 @@ describe('ferramentas do ml-actions', () => {
     const r: any = await executarFerramenta('recriacao_formas', { itemId: '../oauth' });
     expect(r.erro).toBeTruthy();
     expect(chamadas).toHaveLength(0);
+  });
+});
+
+describe('ferramentas da Central de Ocorrencias', () => {
+  it('lista: manda a chave como Bearer, traduz rotulos e repassa filtros', async () => {
+    rotas['GET http://oc.test/api/admin/ocorrencias?status=nova&responsavel=nenhum&q=5001'] = {
+      corpo: {
+        itens: [{ protocolo: 'MCS-20261101-AB12', canal: 'shopee', tipo: 'defeito', status: 'nova', nome: 'Ana', email: 'ana@x.com', pedido: '5001', criado_em: '2026-11-01' }],
+        total: 1,
+        contagem: { nova: 3, em_analise: 2, aguardando_cliente: 1, resolvida: 40 },
+        pendencias: 0,
+        canais: { shopee: 'Shopee' },
+        tipos: { defeito: 'Produto com defeito ou danificado' },
+        status: { nova: 'Recebida' },
+      },
+    };
+    const r: any = await executarFerramenta('ocorrencias_lista', { status: 'nova', semResponsavel: true, busca: '5001' });
+    expect(chamadas[0].init.headers.authorization).toBe('Bearer mcsia_teste');
+    expect(chamadas[0].init.headers['x-api-key']).toBeUndefined();
+    expect(r.abertasNoTotal).toBe(6);
+    expect(r.itens[0]).toMatchObject({ canal: 'Shopee', assunto: 'Produto com defeito ou danificado', status: 'Recebida' });
+    expect(JSON.stringify(r)).not.toContain('ana@x.com');
+  });
+
+  it('detalhe valida o protocolo antes de montar a URL', async () => {
+    const r: any = await executarFerramenta('ocorrencias_detalhe', { protocolo: '../backups/x' });
+    expect(r.erro).toBeTruthy();
+    expect(chamadas).toHaveLength(0);
+  });
+
+  it('detalhe resume historico e nao repassa e-mail, telefone nem dados crus do Tiny', async () => {
+    const eventos = Array.from({ length: 15 }, (_, i) => ({ texto: `evento ${i}`, publico: 1, autor: 'Equipe', criado_em: `2026-11-0${(i % 9) + 1}` }));
+    rotas['GET http://oc.test/api/admin/ocorrencias/MCS-1'] = {
+      corpo: { protocolo: 'MCS-1', status: 'em_analise', nome: 'Ana', email: 'ana@x.com', telefone: '11999', tiny: { enorme: true }, eventos, ml: null, produtos: [{ titulo: 'Copo' }] },
+    };
+    const r: any = await executarFerramenta('ocorrencias_detalhe', { protocolo: 'mcs-1' });
+    expect(r.historico).toHaveLength(10);
+    expect(r.historicoTotal).toBe(15);
+    expect(r.produtos).toEqual(['Copo']);
+    const json = JSON.stringify(r);
+    expect(json).not.toContain('ana@x.com');
+    expect(json).not.toContain('11999');
+    expect(json).not.toContain('enorme');
+  });
+
+  it('403 da Central vira mensagem clara', async () => {
+    rotas['GET http://oc.test/api/admin/estatisticas?dias=30'] = { status: 403, corpo: { erro: 'Apenas o gerente pode fazer isso.' } };
+    await expect(executarFerramenta('ocorrencias_numeros', {})).rejects.toThrow(/chave da IA nao tem acesso/);
+  });
+
+  it('numeros: troca as chaves pelos rotulos e tira os dicionarios', async () => {
+    rotas['GET http://oc.test/api/admin/estatisticas?dias=7'] = {
+      corpo: { dias: 7, total: 2, porCanal: [{ k: 'shopee', n: 2 }], porTipo: [], porDesfecho: [], canais: { shopee: 'Shopee' }, tipos: {}, desfechos: {} },
+    };
+    const r: any = await executarFerramenta('ocorrencias_numeros', { dias: 7 });
+    expect(r.porCanal).toEqual([{ k: 'Shopee', n: 2 }]);
+    expect(r.canais).toBeUndefined();
   });
 });
