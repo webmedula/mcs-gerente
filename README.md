@@ -1,11 +1,19 @@
-# mcs-gerente — v1.1 (2026-11-03)
+# mcs-gerente — v1.2 (2026-11-03)
+
+> **v1.2:** **aviso diário de promoções do ML.** Todo dia às 9h (Brasília) o Gerente pergunta ao
+> ml-analytics (v35+, ferramenta `promocoes_do_ml`) quais propostas de promoção do Mercado Livre
+> apareceram nas últimas 24h e manda a lista pronta para os chats de `TELEGRAM_CHAT_IDS`. Sem
+> proposta nova, não manda nada. Não passa pela IA (texto pronto, sem custo de token).
+> `AVISO_PROMOCOES_HORA` muda a hora (0–23) ou desliga (`-1`). Para testar:
+> `GET /debug/aviso-promocoes?key=SUA_SERVICE_API_KEY` mostra o texto; com `&enviar=1` manda agora.
+
 
 O **Gerente** é o assistente de IA da MCS no Telegram. Ele consulta os **quatro sistemas** da
 operação pelas APIs de cada um, sem acessar banco de ninguém:
 
 | Sistema | O que o Gerente consulta |
 |---|---|
-| **ml-analytics** (v34+) | resumo, top anúncios, margem, reposição, notas, Buy Box, lacunas de custo, SQL, histórico — as ferramentas vêm do próprio analytics |
+| **ml-analytics** (v34+) | resumo, top anúncios, margem, reposição, notas, Buy Box, lacunas de custo, SQL, histórico, promoções do ML (v35+) — as ferramentas vêm do próprio analytics |
 | **ml-actions** | fila de candidatos à recriação, histórico de recriações, diagnóstico de formato |
 | **tiny-pedidos-nf** | pedidos pendentes, prévia do desconto, processados/erros, lotes, vendas do dia, painel, listas de preço |
 | **Central de Ocorrências** (mcs-ocorrencias) | lista de ocorrências por status/canal/responsável, detalhe de um protocolo (histórico, mensagens do ML, devolução, conta da venda), números do período e fila de devoluções |
