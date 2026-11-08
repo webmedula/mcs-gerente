@@ -1,5 +1,12 @@
-# mcs-gerente — v1.3 (2026-11-08)
+# mcs-gerente — v1.4 (2026-11-08)
 
+> **v1.4:** **vigia de logins.** A cada `VIGIA_MINUTOS` (padrão 30; `0` desliga) o Gerente confere os logins
+> do Mercado Livre e do Tiny no ml-analytics, no tiny-pedidos-nf e no ml-actions e manda uma mensagem no
+> Telegram **só quando algo muda**: login caiu, voltou, ou o serviço parou de responder (este só na
+> segunda leitura seguida, para um timeout isolado não virar aviso). Sem IA, sem custo. Ao subir, avisa
+> o que já está caído. `GET /debug/vigia?key=...` lê agora e mostra o estado; `&enviar=1` manda o resumo.
+> A Central de Ocorrências não entra: a rota de status do ML dela é só para pessoas logadas.
+>
 > **v1.3:** **o Gerente entende a operação e sugere.** Três coisas: (1) **memória curta por conversa**: ele
 > lembra as últimas trocas de cada chat do Telegram (`MEMORIA_TROCAS`, padrão 10, por `MEMORIA_MINUTOS`,
 > padrão 180; `/esquecer` limpa), então "e ontem?" e "detalha o segundo" funcionam; (2) ferramenta
@@ -84,12 +91,14 @@ O bot é o mesmo; só muda para onde o Telegram entrega as mensagens.
 
 ```bash
 npm install
-npm test        # 41 testes, sem chamar nenhum sistema real
+npm test        # 46 testes, sem chamar nenhum sistema real
 npm run dev
 ```
 
 ## Histórico de versões
 
+- **v1.4 (2026-11-08)** — vigia de logins (`src/vigia.ts`): confere ML e Tiny nos serviços a cada
+  `VIGIA_MINUTOS` e avisa no Telegram só quando muda; `/debug/vigia`.
 - **v1.3 (2026-11-08)** — memória curta por conversa (`src/assistant/memoria.ts`, `/esquecer`);
   `panorama_da_operacao`; `ml_perguntas_sem_resposta` e `ml_promocoes_aderidas`; roteiro de como olhar a
   operação e sugerir; limites padrão maiores; logins do analytics no `estado_dos_sistemas`.

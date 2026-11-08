@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import { avisoPromocoesRoutes } from './avisoPromocoes';
+import { vigiaRoutes } from './vigia';
 import { config } from './config';
 import { logger } from './logger';
 import { healthRoutes } from './routes/health';
@@ -48,6 +49,7 @@ export function buildServer() {
   app.register(sistemasRoutes);
   app.register(diagnosticoRoutes);
   app.register(avisoPromocoesRoutes);
+  app.register(vigiaRoutes);
 
   app.setErrorHandler((err, _req, reply) => {
     logger.error('Erro nao tratado:', err.message, err.stack);

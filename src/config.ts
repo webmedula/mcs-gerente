@@ -4,7 +4,7 @@ const semBarraFinal = (s: string) => s.replace(/\/+$/, '');
 
 export const config = {
   /** Versao — atualize a cada release. Exibida em /health e no /start do bot. */
-  appVersion: 'gerente v1.3 (2026-11-08)',
+  appVersion: 'gerente v1.4 (2026-11-08)',
 
   port: Number(process.env.PORT || 3020),
   /** Protege /debug/* deste servico (aceita x-api-key ou ?key=). */
@@ -56,6 +56,10 @@ export const config = {
    * minutos. MEMORIA_TROCAS=0 desliga. */
   memoriaTrocas: Number(process.env.MEMORIA_TROCAS || 10),
   memoriaMinutos: Number(process.env.MEMORIA_MINUTOS || 180),
+
+  /** Vigia de logins (v1.4): a cada N minutos confere os logins do ML e do Tiny nos servicos e
+   * avisa no Telegram so quando algo muda. 0 desliga. */
+  vigiaMinutos: Number(process.env.VIGIA_MINUTOS || 30),
 
   // --- Telegram ------------------------------------------------------------------------------
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
