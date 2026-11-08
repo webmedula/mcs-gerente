@@ -4,7 +4,7 @@ const semBarraFinal = (s: string) => s.replace(/\/+$/, '');
 
 export const config = {
   /** Versao — atualize a cada release. Exibida em /health e no /start do bot. */
-  appVersion: 'gerente v1.2 (2026-11-03)',
+  appVersion: 'gerente v1.3 (2026-11-08)',
 
   port: Number(process.env.PORT || 3020),
   /** Protege /debug/* deste servico (aceita x-api-key ou ?key=). */
@@ -47,9 +47,15 @@ export const config = {
   openrouterApiKey: process.env.OPENROUTER_API_KEY || '',
   openrouterBaseUrl: semBarraFinal(process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1'),
   /** Teto de idas e voltas com ferramentas numa pergunta. Com tres sistemas, uma pergunta que
-   * cruza dados usa mais passos que antes — por isso o padrao subiu de 6 para 8. */
-  assistenteMaxPassos: Number(process.env.ASSISTENTE_MAX_PASSOS || 8),
-  assistenteMaxTokens: Number(process.env.ASSISTENTE_MAX_TOKENS || 1500),
+   * cruza dados usa mais passos que antes. v1.3: 10, porque o panorama chama varias de uma vez e o modelo
+   * costuma aprofundar em 2 ou 3 delas depois. */
+  assistenteMaxPassos: Number(process.env.ASSISTENTE_MAX_PASSOS || 10),
+  /** v1.3: subiu de 1500 pra 2500. Um panorama com sugestoes nao cabia em 1500 e saia cortado. */
+  assistenteMaxTokens: Number(process.env.ASSISTENTE_MAX_TOKENS || 2500),
+  /** Memoria curta por conversa (v1.3): quantas trocas o Gerente lembra em cada chat e por quantos
+   * minutos. MEMORIA_TROCAS=0 desliga. */
+  memoriaTrocas: Number(process.env.MEMORIA_TROCAS || 10),
+  memoriaMinutos: Number(process.env.MEMORIA_MINUTOS || 180),
 
   // --- Telegram ------------------------------------------------------------------------------
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',

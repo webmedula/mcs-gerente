@@ -190,3 +190,89 @@ describe('ferramentas da Central de Ocorrencias', () => {
     expect(r.canais).toBeUndefined();
   });
 });
+
+describe('panorama da operacao', () => {
+  const hoje = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const dia = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() + n * 86400000));
+
+  it('junta os sistemas, compara com a semana passada e lista pontos de atencao; sistema fora vira erro no bloco', async () => {
+    rotas['GET http://nf.test/api/dashboard?dias=9'] = {
+      corpo: {
+        hoje: { totalPedidos: 10, vendaReal: 1000, canais: [{ canal: 'Shopee', pedidos: 6, vendaReal: 600 }] },
+        serie: [
+          { data: dia(-8), pedidos: 20, vendaReal: 2000 },
+          { data: dia(-7), pedidos: 12, vendaReal: 1200 },
+          { data: dia(-1), pedidos: 14, vendaReal: 1400 },
+          { data: hoje, pedidos: 10, vendaReal: 1000 },
+        ],
+        operacao: { errosHoje: [{ numeroPedido: 1, erro: 'CNPJ invalido', quando: 'x' }] },
+      },
+    };
+    rotas[`GET http://nf.test/api/sales-report?data=${dia(-1)}`] = { corpo: { report: { totalPedidos: 14, vendaReal: 1400, canais: [] } } };
+    rotas['GET http://nf.test/api/orders/pending'] = {
+      corpo: { orders: [{ numeroPedido: 5, marketplace: 'ML', bloqueado: true, motivoBloqueio: 'nome oculto' }, { numeroPedido: 6, prontoParaNf: true, dataLimiteDespacho: `${hoje}T12:00:00Z` }] },
+    };
+    rotas['POST http://analytics.test/api/assistente/ferramenta/reposicao_de_estoque'] = {
+      corpo: { saida: { itens: [{ itemId: 'MLB1', titulo: 'Copo', urgencia: 'rompido', comprar: 50 }, { itemId: 'MLB2', urgencia: 'ok' }] } },
+    };
+    rotas['POST http://analytics.test/api/assistente/ferramenta/promocoes_vencendo'] = { corpo: { saida: { disponivel: true, totais: { anunciosVencendo: 2, ficouSemPromocao: 0 }, resumoEmTexto: 'x' } } };
+    rotas['GET http://analytics.test/api/questions/pending'] = { corpo: { total: 1, questions: [{ itemId: 'MLB1', text: 'tem azul?', dateCreated: '2026-11-07' }] } };
+    rotas['POST http://analytics.test/api/assistente/ferramenta/buy_box'] = { corpo: { saida: { totalNoFiltro: 0, itens: [] } } };
+    rotas['GET http://oc.test/api/admin/ocorrencias'] = {
+      corpo: { contagem: { nova: 2, em_analise: 1, resolvida: 9 }, itens: [{ protocolo: 'P1', status: 'nova', responsavel: null, tipo: 'defeito' }, { protocolo: 'P2', status: 'nova', responsavel: 'Ana', prazo_em: `${hoje}T10:00:00Z` }], tipos: { defeito: 'Defeito' } },
+    };
+    // devolucoes sem rota: deve virar erro no bloco, nao derrubar o panorama
+    rotas['GET http://analytics.test/api/oauth/ml/status'] = { corpo: { authenticated: false } };
+    rotas['GET http://analytics.test/api/tiny/status'] = { corpo: { authenticated: true } };
+    rotas['GET http://nf.test/api/oauth/status'] = { corpo: { authenticated: true } };
+    rotas['GET http://nf.test/api/oauth/ml/status'] = { corpo: { authenticated: true } };
+
+    const r: any = await executarFerramenta('panorama_da_operacao', {});
+    expect(r.vendas.ontemContraSemanaPassada.variacaoPercentual).toBe(-30);
+    expect(r.vendas.mesmoDiaSemanaPassada.variacaoPercentual).toBeCloseTo(-16.7, 1);
+    expect(r.pedidosENotas.totalBloqueados).toBe(1);
+    expect(r.pedidosENotas.totalDespachoVenceHoje).toBe(1);
+    expect(r.estoque.totalRompidos).toBe(1);
+    expect(r.clientes.ocorrencias.abertas).toBe(3);
+    expect(r.clientes.ocorrencias.semResponsavel).toHaveLength(1);
+    expect(r.clientes.devolucoes.erro).toMatch(/Central de Ocorrencias/);
+    expect(r.logins['ml-analytics'].mercadoLivre.valido).toBe(false);
+    const texto = r.pontosDeAtencao.join('\n');
+    for (const esperado of ['Vendas de ontem -30%', '1 pedido(s) bloqueado', '1 nota(s) com erro', 'despacho vencendo hoje', 'estoque rompido', 'promocao vencendo', '1 pergunta(s) sem resposta', 'sem responsavel', 'prazo do ML', 'Login do Mercado Livre caiu no ml-analytics']) {
+      expect(texto).toContain(esperado);
+    }
+    expect(r.blocosComFalha).toBe(1);
+  });
+
+  it('com tudo fora do ar ainda responde, com erro em cada bloco', async () => {
+    const r: any = await executarFerramenta('panorama_da_operacao', {});
+    expect(r.vendas.erro).toBeTruthy();
+    expect(r.pontosDeAtencao).toEqual(['Nada pedindo atencao nos dados disponiveis.']);
+    expect(r.blocosComFalha).toBe(8);
+  });
+});
+
+describe('rotas do analytics que nao sao ferramentas la', () => {
+  it('perguntas sem resposta: mais antigas primeiro e texto cortado', async () => {
+    rotas['GET http://analytics.test/api/questions/pending'] = {
+      corpo: { total: 2, questions: [{ itemId: 'MLB2', text: 'b', dateCreated: '2026-11-07' }, { itemId: 'MLB1', text: 'a'.repeat(400), dateCreated: '2026-11-01', itemTitle: 'Copo' }] },
+    };
+    const r: any = await executarFerramenta('ml_perguntas_sem_resposta', { limite: 5 });
+    expect(r.itens[0].anuncio).toBe('Copo');
+    expect(r.itens[0].pergunta).toHaveLength(300);
+  });
+
+  it('adesoes: filtra por status e nao manda o corpo nem a resposta crua do ML', async () => {
+    rotas['GET http://analytics.test/api/promocoes/adesoes'] = {
+      corpo: { escritaHabilitada: true, items: [
+        { quando: '2026-11-05', itemId: 'MLB1', tipo: 'SMART', status: 'sucesso', corpo: { x: 1 }, respostaMl: { y: 2 } },
+        { quando: '2026-11-06', itemId: 'MLB2', tipo: 'DEAL', status: 'erro', erro: 'preco fora da faixa', corpo: {}, respostaMl: {} },
+      ] },
+    };
+    const r: any = await executarFerramenta('ml_promocoes_aderidas', { status: 'erro' });
+    expect(r.porStatus).toEqual({ sucesso: 1, erro: 1 });
+    expect(r.itens).toHaveLength(1);
+    expect(r.itens[0].erro).toBe('preco fora da faixa');
+    expect(JSON.stringify(r)).not.toContain('respostaMl');
+  });
+});

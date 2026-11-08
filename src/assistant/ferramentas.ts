@@ -42,6 +42,31 @@ function contarPor<T>(lista: T[], chave: (t: T) => string): Record<string, numbe
   return r;
 }
 
+/** Erro vira dado: num panorama, um sistema fora nao pode derrubar os outros. */
+async function tentar<T>(fn: () => Promise<T>): Promise<T | { erro: string }> {
+  try {
+    return await fn();
+  } catch (err: any) {
+    return { erro: err?.message || String(err) };
+  }
+}
+const falhou = (r: unknown): r is { erro: string } => !!r && typeof r === 'object' && 'erro' in (r as any);
+
+/** Mesmo dia da semana anterior (YYYY-MM-DD), no fuso de Sao Paulo. */
+function dataEmBrasilia(deslocDias = 0): string {
+  const d = new Date(Date.now() + deslocDias * 86400000);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
+/** Executa uma ferramenta do analytics e devolve so a saida dela. */
+async function ferramentaDoAnalytics(nome: string, entrada: Record<string, unknown>): Promise<any> {
+  const r = await chamar('analytics', `/api/assistente/ferramenta/${nome}`, { metodo: 'POST', corpo: { entrada } });
+  return r?.saida;
+}
+
+const variacao = (hoje: number | null | undefined, antes: number | null | undefined): number | null =>
+  hoje == null || antes == null || antes === 0 ? null : Math.round(((hoje - antes) / antes) * 1000) / 10;
+
 // ------------------------------------------------------------------------- ferramentas locais
 
 export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
@@ -58,16 +83,11 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
       input_schema: { type: 'object', properties: {} },
     },
     async executar() {
-      const tentar = async (fn: () => Promise<unknown>) => {
-        try {
-          return await fn();
-        } catch (err: any) {
-          return { erro: err?.message || String(err) };
-        }
-      };
       const s = sistemas();
-      const [aHealth, acHealth, acStatus, nfHealth, nfTiny, nfMl, nfAgenda, ocHealth, ocChave] = await Promise.all([
+      const [aHealth, aMl, aTiny, acHealth, acStatus, nfHealth, nfTiny, nfMl, nfAgenda, ocHealth, ocChave] = await Promise.all([
         tentar(() => chamar('analytics', '/health')),
+        tentar(() => chamar('analytics', '/api/oauth/ml/status')),
+        tentar(() => chamar('analytics', '/api/tiny/status')),
         tentar(() => chamar('actions', '/health')),
         tentar(() => chamar('actions', '/api/status')),
         tentar(() => chamar('nf', '/health')),
@@ -78,10 +98,249 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
         tentar(() => chamar('ocorrencias', '/api/admin/me')),
       ]);
       return {
-        [s.analytics.rotulo]: { health: aHealth },
+        [s.analytics.rotulo]: { health: aHealth, loginMercadoLivre: aMl, loginTiny: aTiny },
         [s.actions.rotulo]: { health: acHealth, status: acStatus },
         [s.nf.rotulo]: { health: nfHealth, loginTiny: nfTiny, loginMercadoLivre: nfMl, agendadorDeNotas: nfAgenda },
         [s.ocorrencias.rotulo]: { health: ocHealth, chaveDoGerente: ocChave },
+      };
+    },
+  },
+
+  {
+    sistema: 'geral',
+    definicao: {
+      name: 'panorama_da_operacao',
+      description:
+        'VISAO GERAL da operacao num unico passo, cruzando os quatro sistemas. Traz: vendas de hoje e de ontem ' +
+        'comparadas com o mesmo dia da semana anterior (todos os canais, pelo Tiny); pedidos bloqueados e notas ' +
+        'com erro; estoque rompido ou critico no ML; promocoes vencendo e anuncios que ficaram sem promocao; ' +
+        'perguntas sem resposta no ML; ocorrencias abertas, sem responsavel e devolucoes aguardando acao; logins ' +
+        'do ML e do Tiny. Cada bloco diz de qual sistema veio e se falhou. Use PRIMEIRO em "como estamos?", ' +
+        '"o que preciso fazer hoje?", "resumo do dia" e depois aprofunde so no que pede atencao.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    async executar() {
+      const hoje = dataEmBrasilia(0);
+      const ontem = dataEmBrasilia(-1);
+      const s = sistemas();
+      const temOcorrencias = !!s.ocorrencias.baseUrl;
+
+      const [painel, vendasOntem, pendentes, reposicao, promocoes, perguntas, buyBox, ocorrencias, devolucoes, mlAnalytics, tinyAnalytics, tinyNf, mlNf] =
+        await Promise.all([
+          tentar(() => chamar('nf', '/api/dashboard?dias=9')),
+          tentar(() => chamar('nf', `/api/sales-report?data=${ontem}`)),
+          tentar(() => chamar('nf', '/api/orders/pending')),
+          tentar(() => ferramentaDoAnalytics('reposicao_de_estoque', { limite: 20 })),
+          tentar(() => ferramentaDoAnalytics('promocoes_vencendo', { limite: 10 })),
+          tentar(() => chamar('analytics', '/api/questions/pending')),
+          tentar(() => ferramentaDoAnalytics('buy_box', { limite: 5 })),
+          temOcorrencias ? tentar(() => chamar('ocorrencias', '/api/admin/ocorrencias')) : Promise.resolve({ erro: 'Central de Ocorrencias nao ligada ao Gerente.' }),
+          temOcorrencias ? tentar(() => chamar('ocorrencias', '/api/admin/devolucoes')) : Promise.resolve({ erro: 'Central de Ocorrencias nao ligada ao Gerente.' }),
+          tentar(() => chamar('analytics', '/api/oauth/ml/status')),
+          tentar(() => chamar('analytics', '/api/tiny/status')),
+          tentar(() => chamar('nf', '/api/oauth/status')),
+          tentar(() => chamar('nf', '/api/oauth/ml/status')),
+        ]);
+
+      const atencao: string[] = [];
+      const bloco = (nome: string, r: unknown, monta: (r: any) => unknown) => (falhou(r) ? { sistema: nome, erro: r.erro } : { sistema: nome, ...(monta(r) as object) });
+
+      // ---- vendas: hoje e ontem contra o mesmo dia da semana anterior (serie do painel)
+      const vendas = bloco('tiny-pedidos-nf', painel, (p) => {
+        const serie: any[] = Array.isArray(p?.serie) ? p.serie : [];
+        const doDia = (d: string) => serie.find((x) => x.data === d);
+        const semanaPassadaHoje = doDia(dataEmBrasilia(-7));
+        const semanaPassadaOntem = doDia(dataEmBrasilia(-8));
+        const h = p?.hoje ?? {};
+        const o = falhou(vendasOntem) ? null : (vendasOntem as any)?.report ?? doDia(ontem);
+        const vendaOntem = o?.vendaReal ?? null;
+        const vHoje = variacao(h.vendaReal, semanaPassadaHoje?.vendaReal);
+        const vOntem = variacao(vendaOntem, semanaPassadaOntem?.vendaReal);
+        if (vOntem != null && vOntem <= -20) atencao.push(`Vendas de ontem ${vOntem}% abaixo do mesmo dia da semana passada.`);
+        return {
+          hoje: { data: hoje, pedidos: h.totalPedidos, vendaReal: h.vendaReal, porCanal: (h.canais ?? []).map((c: any) => ({ canal: c.canal, pedidos: c.pedidos, vendaReal: c.vendaReal })) },
+          mesmoDiaSemanaPassada: semanaPassadaHoje ? { data: semanaPassadaHoje.data, pedidos: semanaPassadaHoje.pedidos, vendaReal: semanaPassadaHoje.vendaReal, variacaoPercentual: vHoje } : null,
+          observacaoHoje: 'O dia ainda nao acabou: compare so com cautela.',
+          ontem: { data: ontem, pedidos: o?.totalPedidos ?? o?.pedidos, vendaReal: vendaOntem, porCanal: (o?.canais ?? []).map((c: any) => ({ canal: c.canal, pedidos: c.pedidos, vendaReal: c.vendaReal })) },
+          ontemContraSemanaPassada: semanaPassadaOntem ? { data: semanaPassadaOntem.data, vendaReal: semanaPassadaOntem.vendaReal, variacaoPercentual: vOntem } : null,
+          participacaoPorCanal7d: p?.canais7d,
+          topProdutos7d: (p?.topProdutos7d ?? []).slice(0, 5),
+        };
+      });
+
+      // ---- pedidos e notas
+      const pedidos = bloco('tiny-pedidos-nf', pendentes, (r) => {
+        const todos: any[] = r?.orders ?? [];
+        const bloqueados = todos.filter((o) => o.bloqueado);
+        const prontos = todos.filter((o) => o.prontoParaNf && !o.jaProcessado);
+        const venceHoje = todos.filter((o) => String(o.dataLimiteDespacho ?? o.dataPrevista ?? '').slice(0, 10) === hoje && !o.jaProcessado);
+        const erros: any[] = falhou(painel) ? [] : (painel as any)?.operacao?.errosHoje ?? [];
+        if (bloqueados.length) atencao.push(`${bloqueados.length} pedido(s) bloqueado(s) para nota.`);
+        if (erros.length) atencao.push(`${erros.length} nota(s) com erro hoje.`);
+        if (venceHoje.length) atencao.push(`${venceHoje.length} pedido(s) com despacho vencendo hoje ainda sem nota.`);
+        return {
+          retratoDe: r?.atualizadoEm,
+          pendentes: todos.length,
+          prontosParaNf: prontos.length,
+          bloqueados: bloqueados.slice(0, 5).map((o) => ({ pedido: o.numeroPedido, canal: o.marketplace, motivo: o.motivoBloqueio })),
+          totalBloqueados: bloqueados.length,
+          despachoVenceHoje: venceHoje.slice(0, 5).map((o) => ({ pedido: o.numeroPedido, canal: o.marketplace })),
+          totalDespachoVenceHoje: venceHoje.length,
+          notasComErroHoje: erros.slice(0, 5),
+          totalNotasComErroHoje: erros.length,
+        };
+      });
+
+      // ---- estoque
+      const estoque = bloco('ml-analytics', reposicao, (r) => {
+        const itens: any[] = r?.itens ?? [];
+        const rompidos = itens.filter((i) => i.urgencia === 'rompido');
+        const criticos = itens.filter((i) => i.urgencia === 'critico');
+        if (rompidos.length) atencao.push(`${rompidos.length} produto(s) com estoque rompido no ML.`);
+        if (criticos.length) atencao.push(`${criticos.length} produto(s) com estoque critico no ML.`);
+        return {
+          disponivel: r?.disponivel,
+          mensagem: r?.mensagem,
+          resumo: r?.resumo,
+          rompidos: rompidos.slice(0, 5).map((i) => ({ itemId: i.itemId, titulo: i.titulo, comprar: i.comprar })),
+          criticos: criticos.slice(0, 5).map((i) => ({ itemId: i.itemId, titulo: i.titulo, estoque: i.estoque, diasAteRuptura: i.diasAteRuptura, comprar: i.comprar })),
+          totalRompidos: rompidos.length,
+          totalCriticos: criticos.length,
+        };
+      });
+
+      // ---- Mercado Livre: promocoes, perguntas, buy box
+      const mercadoLivre = {
+        promocoes: bloco('ml-analytics', promocoes, (r) => {
+          const t = r?.totais ?? {};
+          if (t.anunciosVencendo) atencao.push(`${t.anunciosVencendo} anuncio(s) com promocao vencendo em breve.`);
+          if (t.ficouSemPromocao) atencao.push(`${t.ficouSemPromocao} anuncio(s) ficaram sem promocao.`);
+          return { disponivel: r?.disponivel, aviso: r?.aviso ?? r?.mensagem, totais: t, resumoEmTexto: r?.resumoEmTexto ?? null };
+        }),
+        perguntasSemResposta: bloco('ml-analytics', perguntas, (r) => {
+          const lista: any[] = r?.questions ?? [];
+          if (lista.length) atencao.push(`${lista.length} pergunta(s) sem resposta no Mercado Livre.`);
+          return {
+            total: r?.total ?? lista.length,
+            atualizadoEm: r?.atualizadoEm,
+            maisAntigas: [...lista].sort((a, b) => String(a.dateCreated).localeCompare(String(b.dateCreated))).slice(0, 3)
+              .map((q) => ({ anuncio: q.itemTitle ?? q.itemId, desde: q.dateCreated, pergunta: String(q.text ?? '').slice(0, 160) })),
+          };
+        }),
+        buyBox: bloco('ml-analytics', buyBox, (r) => {
+          const n = r?.totalNoFiltro ?? 0;
+          if (n) atencao.push(`${n} anuncio(s) de catalogo perdendo o Buy Box.`);
+          return { perdendo: n, exemplos: (r?.itens ?? []).slice(0, 3), mensagem: r?.mensagem };
+        }),
+      };
+
+      // ---- clientes: ocorrencias e devolucoes
+      const clientes = {
+        ocorrencias: bloco('Central de Ocorrencias', ocorrencias, (r) => {
+          const contagem: Record<string, number> = r?.contagem ?? {};
+          const abertas = Object.entries(contagem).filter(([k]) => k !== 'resolvida').reduce((t, [, n]) => t + Number(n), 0);
+          const itens: any[] = (r?.itens ?? []).filter((i: any) => i.status !== 'resolvida');
+          const semResponsavel = itens.filter((i) => !i.responsavel);
+          const comPrazoHoje = itens.filter((i) => String(i.prazo_em ?? '').slice(0, 10) <= hoje && i.prazo_em);
+          if (semResponsavel.length) atencao.push(`${semResponsavel.length} ocorrencia(s) aberta(s) sem responsavel (entre as 25 mais recentes).`);
+          if (comPrazoHoje.length) atencao.push(`${comPrazoHoje.length} ocorrencia(s) com prazo do ML vencendo hoje ou vencido.`);
+          return {
+            abertas,
+            porStatus: contagem,
+            pendenciasComMlAguardando: r?.pendencias,
+            semResponsavel: semResponsavel.slice(0, 5).map((i) => ({ protocolo: i.protocolo, assunto: r?.tipos?.[i.tipo] ?? i.tipo, abertaEm: i.criado_em })),
+            prazoMlVencendo: comPrazoHoje.slice(0, 5).map((i) => ({ protocolo: i.protocolo, prazo: i.prazo_em, responsavel: i.responsavel })),
+            observacao: 'Sem responsavel e prazo olham so as 25 ocorrencias mais recentes; use ocorrencias_lista para a lista completa.',
+          };
+        }),
+        devolucoes: bloco('Central de Ocorrencias', devolucoes, (r) => {
+          const c: Record<string, number> = r?.contagem ?? {};
+          const pedemAcao = (c.aguardando_liberacao ?? 0) + (c.recebida ?? 0) + (c.nao_entregue ?? 0) + (c.em_contestacao ?? 0);
+          if (pedemAcao) atencao.push(`${pedemAcao} devolucao(oes) pedindo acao (liberar, conferir, nao chegou ou em contestacao).`);
+          return { pedemAcao, porEtapa: Object.fromEntries(Object.entries(c).map(([k, n]) => [r?.status?.[k] ?? k, n])) };
+        }),
+      };
+
+      // ---- logins
+      const login = (r: unknown, campo: string) => (falhou(r) ? { erro: r.erro } : { valido: !!(r as any)?.[campo] });
+      const logins = {
+        'ml-analytics': { mercadoLivre: login(mlAnalytics, 'authenticated'), tiny: login(tinyAnalytics, 'authenticated') },
+        'tiny-pedidos-nf': { tiny: login(tinyNf, 'authenticated'), mercadoLivre: login(mlNf, 'authenticated') },
+      };
+      for (const [sis, l] of Object.entries(logins)) {
+        for (const [nome, v] of Object.entries(l)) {
+          if ('valido' in v && v.valido === false) atencao.push(`Login do ${nome === 'tiny' ? 'Tiny' : 'Mercado Livre'} caiu no ${sis}.`);
+        }
+      }
+
+      const sistemasComFalha = [painel, pendentes, reposicao, promocoes, perguntas, buyBox, ocorrencias, devolucoes].filter(falhou).length;
+      return {
+        geradoEm: new Date().toISOString(),
+        hoje,
+        pontosDeAtencao: atencao.length ? atencao : ['Nada pedindo atencao nos dados disponiveis.'],
+        blocosComFalha: sistemasComFalha || undefined,
+        vendas,
+        pedidosENotas: pedidos,
+        estoque,
+        mercadoLivre,
+        clientes,
+        logins,
+      };
+    },
+  },
+
+  // ---------------------------------------------------------------- ml-analytics (rotas que nao sao ferramentas la)
+  {
+    sistema: 'analytics',
+    definicao: {
+      name: 'ml_perguntas_sem_resposta',
+      description:
+        'Perguntas de compradores no Mercado Livre que ainda estao SEM RESPOSTA, com o anuncio, a data e o texto. ' +
+        'Pergunta parada derruba a conversao do anuncio. Mais antigas primeiro. So leitura: o Gerente nao responde.',
+      input_schema: { type: 'object', properties: { limite: { type: 'integer', description: '1 a 20, padrao 10' } } },
+    },
+    async executar(entrada) {
+      const r = await chamar('analytics', '/api/questions/pending');
+      const lista: any[] = [...(r?.questions ?? [])].sort((a, b) => String(a.dateCreated).localeCompare(String(b.dateCreated)));
+      return {
+        total: r?.total ?? lista.length,
+        atualizadoEm: r?.atualizadoEm,
+        itens: lista.slice(0, limitar(entrada?.limite, 10)).map((q) => ({
+          anuncio: q.itemTitle ?? null, itemId: q.itemId, desde: q.dateCreated, pergunta: String(q.text ?? '').slice(0, 300), link: q.permalink,
+        })),
+      };
+    },
+  },
+  {
+    sistema: 'analytics',
+    definicao: {
+      name: 'ml_promocoes_aderidas',
+      description:
+        'Historico das adesoes a promocoes do Mercado Livre feitas pelo painel do ml-analytics: quando, anuncio, tipo e nome ' +
+        'da promocao, preco final e se o ML aceitou ou recusou (com o erro). Mais recentes primeiro. Use para "o que ja ' +
+        'aderimos?" ou "deu certo a adesao do MLB X?".',
+      input_schema: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['sucesso', 'erro'] },
+          limite: { type: 'integer', description: '1 a 20, padrao 10' },
+        },
+      },
+    },
+    async executar(entrada) {
+      const r = await chamar('analytics', '/api/promocoes/adesoes');
+      let itens: any[] = [...(r?.items ?? [])].sort((a, b) => String(b.quando).localeCompare(String(a.quando)));
+      const porStatus = contarPor(itens, (i) => String(i.status));
+      if (entrada?.status) itens = itens.filter((i) => i.status === entrada.status);
+      return {
+        escritaDePromocoesLigada: r?.escritaHabilitada,
+        total: Object.values(porStatus).reduce((t, n) => t + n, 0),
+        porStatus,
+        // O corpo enviado ao ML e a resposta crua nao ajudam a responder; o erro em texto sim.
+        itens: itens.slice(0, limitar(entrada?.limite, 10)).map((i) => ({
+          quando: i.quando, itemId: i.itemId, titulo: i.titulo, tipo: i.tipo, promocao: i.nome ?? i.promocaoId,
+          precoFinal: i.precoFinal, status: i.status, erro: i.erro ?? undefined,
+        })),
       };
     },
   },
