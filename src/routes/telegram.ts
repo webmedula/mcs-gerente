@@ -4,6 +4,7 @@ import { logger } from '../logger';
 import { listarModelos, perguntar, resolverModelo } from '../assistant/conversa';
 import { catalogo } from '../assistant/ferramentas';
 import { provedorAtivo } from '../assistant/provedores';
+import { esquecer, resumoDaMemoria } from '../assistant/memoria';
 
 /**
  * BOT DO TELEGRAM.
@@ -72,6 +73,12 @@ export async function telegramRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
+    if (texto === '/esquecer') {
+      esquecer(chatId);
+      await enviar(chatId, 'Pronto, esqueci a conversa. Pode comecar outro assunto.');
+      return;
+    }
+
     if (texto === '/start' || texto === '/ajuda') {
       await enviar(chatId,
         `Gerente da MCS (${config.appVersion}). Consulto ml-analytics, ml-actions, tiny-pedidos-nf e a Central de Ocorrencias.\n\n` +
@@ -83,13 +90,15 @@ export async function telegramRoutes(app: FastifyInstance): Promise<void> {
         '- alguma nota deu erro hoje?\n' +
         '- quais anuncios estao na fila de recriacao?\n' +
         '- quantas reclamacoes estao abertas sem responsavel?\n' +
-        '- os sistemas estao todos funcionando?\n\n' +
+        '- os sistemas estao todos funcionando?\n' +
+        '- como esta a operacao hoje? o que preciso fazer?\n\n' +
+        'Eu lembro das ultimas mensagens desta conversa; /esquecer limpa.\n' +
         'Eu so leio dados: nao emito nota, nao recrio anuncio e nao altero preco nem estoque.');
       return;
     }
 
     try {
-      const r = await perguntar(texto);
+      const r = await perguntar(texto, { conversa: chatId });
       logger.info(`[TELEGRAM] "${texto.slice(0, 60)}" -> ${r.passos} passo(s), ferramentas: ${r.ferramentasUsadas.join(', ') || 'nenhuma'}`);
       await enviar(chatId, r.texto);
     } catch (err: any) {
@@ -113,6 +122,7 @@ export async function telegramRoutes(app: FastifyInstance): Promise<void> {
       telegramWebhookSecret: config.telegramWebhookSecret ? 'configurado' : 'FALTANDO',
       chatIdsLiberados: config.telegramChatIds.length,
       chatIdsVistosRecentemente: [...ultimosChatIds],
+      memoria: { trocasPorChat: config.memoriaTrocas, minutos: config.memoriaMinutos, conversasVivas: resumoDaMemoria() },
     };
 
     // Quais ferramentas o bot enxerga agora, por sistema (as do analytics vem de la).

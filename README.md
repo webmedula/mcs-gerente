@@ -1,5 +1,17 @@
-# mcs-gerente — v1.2 (2026-11-03)
+# mcs-gerente — v1.3 (2026-11-08)
 
+> **v1.3:** **o Gerente entende a operação e sugere.** Três coisas: (1) **memória curta por conversa**: ele
+> lembra as últimas trocas de cada chat do Telegram (`MEMORIA_TROCAS`, padrão 10, por `MEMORIA_MINUTOS`,
+> padrão 180; `/esquecer` limpa), então "e ontem?" e "detalha o segundo" funcionam; (2) ferramenta
+> **`panorama_da_operacao`**: um passo só que cruza os quatro sistemas (vendas de hoje e de ontem contra o
+> mesmo dia da semana anterior, pedidos bloqueados e notas com erro, estoque rompido/crítico, promoções
+> vencendo, perguntas sem resposta, Buy Box, ocorrências sem responsável e com prazo do ML, devoluções
+> pedindo ação, logins) e devolve uma lista de pontos de atenção; (3) **roteiro novo**: como olhar a
+> operação em ordem de importância, sempre comparar com o período anterior, cruzar sistemas e terminar
+> com até 3 sugestões (o que fazer, por quê com o número, onde). Também: `ml_perguntas_sem_resposta`,
+> `ml_promocoes_aderidas`, logins do ML e do Tiny do analytics no `estado_dos_sistemas`, e os limites
+> padrão subiram (`ASSISTENTE_MAX_TOKENS` 2500, `ASSISTENTE_MAX_PASSOS` 10). Continua somente leitura.
+>
 > **v1.2:** **aviso diário de promoções do ML.** Todo dia às 9h (Brasília) o Gerente pergunta ao
 > ml-analytics (v35+, ferramenta `promocoes_do_ml`) quais propostas de promoção do Mercado Livre
 > apareceram nas últimas 24h e manda a lista pronta para os chats de `TELEGRAM_CHAT_IDS`. Sem
@@ -13,11 +25,11 @@ operação pelas APIs de cada um, sem acessar banco de ninguém:
 
 | Sistema | O que o Gerente consulta |
 |---|---|
-| **ml-analytics** (v34+) | resumo, top anúncios, margem, reposição, notas, Buy Box, lacunas de custo, SQL, histórico, promoções do ML (v35+) — as ferramentas vêm do próprio analytics |
+| **ml-analytics** (v34+) | resumo, top anúncios, margem, reposição, notas, Buy Box, lacunas de custo, SQL, histórico, promoções do ML (v35+) — as ferramentas vêm do próprio analytics; mais perguntas sem resposta e adesões a promoções |
 | **ml-actions** | fila de candidatos à recriação, histórico de recriações, diagnóstico de formato |
 | **tiny-pedidos-nf** | pedidos pendentes, prévia do desconto, processados/erros, lotes, vendas do dia, painel, listas de preço |
 | **Central de Ocorrências** (mcs-ocorrencias) | lista de ocorrências por status/canal/responsável, detalhe de um protocolo (histórico, mensagens do ML, devolução, conta da venda), números do período e fila de devoluções |
-| geral | `estado_dos_sistemas`: saúde, versões, logins ML/Tiny, agendador de notas |
+| geral | `panorama_da_operacao`: visão geral dos quatro sistemas com pontos de atenção · `estado_dos_sistemas`: saúde, versões, logins ML/Tiny, agendador de notas |
 
 ## v1 = somente leitura
 
@@ -72,12 +84,15 @@ O bot é o mesmo; só muda para onde o Telegram entrega as mensagens.
 
 ```bash
 npm install
-npm test        # 30 testes, sem chamar nenhum sistema real
+npm test        # 41 testes, sem chamar nenhum sistema real
 npm run dev
 ```
 
 ## Histórico de versões
 
+- **v1.3 (2026-11-08)** — memória curta por conversa (`src/assistant/memoria.ts`, `/esquecer`);
+  `panorama_da_operacao`; `ml_perguntas_sem_resposta` e `ml_promocoes_aderidas`; roteiro de como olhar a
+  operação e sugerir; limites padrão maiores; logins do analytics no `estado_dos_sistemas`.
 - **v1.1 (2026-11-03)** — Central de Ocorrências como quarto sistema, somente leitura: ferramentas
   `ocorrencias_lista`, `ocorrencias_detalhe`, `ocorrencias_numeros` e `ocorrencias_devolucoes`; chave
   enviada como Bearer; lista fechada de rotas GET; e-mail, telefone e dados crus do Tiny não vão pro
