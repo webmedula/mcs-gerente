@@ -8,6 +8,7 @@ process.env.ANALYTICS_BASE_URL = 'http://analytics.test';
 process.env.ACTIONS_BASE_URL = 'http://actions.test';
 process.env.NF_BASE_URL = 'http://nf.test';
 process.env.NF_API_KEY = 'chave-nf';
+process.env.NF_DASHBOARD_KEY = 'senha-do-painel';
 process.env.OCORRENCIAS_BASE_URL = 'http://oc.test';
 process.env.OCORRENCIAS_API_KEY = 'mcsia_teste';
 process.env.BACKUP_BASE_URL = 'http://backup.test';
@@ -116,6 +117,24 @@ describe('ferramentas do tiny-pedidos-nf', () => {
   it('erro HTTP do sistema chega como mensagem util', async () => {
     rotas['GET http://nf.test/api/processed'] = { status: 401, corpo: { mensagem: 'x-api-key invalida' } };
     await expect(executarFerramenta('nf_processados', {})).rejects.toThrow(/recusou a chave/);
+  });
+});
+
+describe('senha do painel de vendas do nf (v1.5.1)', () => {
+  it('manda x-dashboard-key junto com a x-api-key, so para o nf', async () => {
+    rotas['GET http://nf.test/api/sales-report?data=2026-11-08'] = { corpo: { report: { totalPedidos: 1 } } };
+    await executarFerramenta('nf_vendas_do_dia', { data: '2026-11-08' });
+    expect(chamadas[0].init.headers['x-api-key']).toBe('chave-nf');
+    expect(chamadas[0].init.headers['x-dashboard-key']).toBe('senha-do-painel');
+    rotas['GET http://actions.test/api/status'] = { corpo: {} };
+    rotas['GET http://oc.test/api/admin/me'] = { corpo: {} };
+    await executarFerramenta('estado_dos_sistemas', {});
+    for (const c of chamadas.filter((x) => !x.url.startsWith('http://nf.test'))) expect(c.init.headers['x-dashboard-key']).toBeUndefined();
+  });
+
+  it('401 com dashboardAuth explica a senha em vez de culpar a chave', async () => {
+    rotas['GET http://nf.test/api/sales-report?data=2026-11-08'] = { status: 401, corpo: { mensagem: 'Dashboard protegido', dashboardAuth: true } };
+    await expect(executarFerramenta('nf_vendas_do_dia', { data: '2026-11-08' })).rejects.toThrow(/NF_DASHBOARD_KEY/);
   });
 });
 
