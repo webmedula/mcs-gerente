@@ -1,5 +1,9 @@
-# mcs-gerente — v1.5.1 (2026-11-09)
+# mcs-gerente — v1.5.2 (2026-11-09)
 
+> **v1.5.2:** `/debug/diagnostico/nf` agora mostra a **versão do Gerente que está no ar** e se a
+> `NF_DASHBOARD_KEY` está configurada (comprimento e hash, nunca o valor), pra saber na hora se o 401 do painel
+> é deploy antigo ou variável faltando/errada.
+>
 > **v1.5.1:** **senha do painel de vendas do nf.** O tiny-pedidos-nf protege `/api/dashboard` e `/api/sales-report`
 > com uma segunda senha (`DASHBOARD_PASSWORD`, cabeçalho `x-dashboard-key`), além da `SERVICE_API_KEY`. Era isso o
 > "401 do nf" no panorama e nas vendas do dia. Copie o valor para `NF_DASHBOARD_KEY` no Gerente; o erro agora diz isso.
@@ -116,6 +120,8 @@ npm run dev
 
 ## Histórico de versões
 
+- **v1.5.2 (2026-11-09)** — `/debug/diagnostico/:sistema` informa `versaoDoGerente` e `cabecalhosExtras`
+  (se a `NF_DASHBOARD_KEY` está configurada, com comprimento e hash).
 - **v1.5.1 (2026-11-09)** — `NF_DASHBOARD_KEY`: manda o `x-dashboard-key` que o tiny-pedidos-nf exige em
   `/api/dashboard` e `/api/sales-report`; 401 dessas rotas explica a causa.
 - **v1.5 (2026-11-09)** — acesso de leitura a tudo: Backup do Tiny como quinto sistema

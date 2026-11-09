@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { FastifyInstance } from 'fastify';
 import { cabecalhoDaChave, NomeSistema, sistemas } from '../sistemas';
+import { config } from '../config';
 
 /**
  * DIAGNOSTICO — pra investigar o 401 intermitente do tiny-pedidos-nf.
@@ -70,15 +71,31 @@ export async function diagnosticoRoutes(app: FastifyInstance): Promise<void> {
     const rotaRepetida = rotas[nome]?.[1] ?? rotas[nome]?.[0];
     if (rotaRepetida) resultado[`${rotaRepetida} (3x seguidas)`] = await testar(rotaRepetida, 3);
 
+    // Cabecalhos extras (ex.: x-dashboard-key do nf): mostra que estao configurados e o hash do
+    // valor, pra comparar com o que o outro servico espera, sem nunca expor a senha.
+    const extras = Object.entries(s.cabecalhosExtras ?? {}).map(([nome, valor]) => ({
+      cabecalho: nome,
+      comprimento: valor.length,
+      sha256: resumoHash(valor),
+    }));
+
     return {
+      versaoDoGerente: config.appVersion,
       sistema: s.rotulo,
       baseUrl: s.baseUrl,
-      chave: s.apiKey
-        ? { comprimento: s.apiKey.length, sha256: createHash('sha256').update(s.apiKey).digest('hex').slice(0, 16) + '…' }
-        : 'sem chave configurada',
+      chave: s.apiKey ? { comprimento: s.apiKey.length, sha256: resumoHash(s.apiKey) } : 'sem chave configurada',
+      cabecalhosExtras: extras.length
+        ? extras
+        : nome === 'nf'
+          ? 'NF_DASHBOARD_KEY nao configurada: /api/sales-report e /api/dashboard vao dar 401 se o nf tiver DASHBOARD_PASSWORD'
+          : 'nenhum',
       testes: resultado,
     };
   });
+}
+
+function resumoHash(valor: string): string {
+  return createHash('sha256').update(valor).digest('hex').slice(0, 16) + '…';
 }
 
 function dataDeHoje(): string {
