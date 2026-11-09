@@ -12,7 +12,9 @@ import { enviar } from './routes/telegram';
  * metade. O vigia confere todos a cada VIGIA_MINUTOS e manda uma mensagem no Telegram SO quando
  * algo muda (caiu, voltou, servico fora do ar). Nao passa pela IA: texto pronto, sem custo.
  *
- * A Central de Ocorrencias nao entra: a rota de status do ML dela e so pra pessoas logadas.
+ * v1.5: entram a Central de Ocorrencias (Central v1.12.0 abriu /ml/status pra chave da IA; so conta se o
+ * ML estiver configurado la) e o Backup do Tiny (alvo de SAUDE: avisa quando a tela Saude dele ganha
+ * alerta, com o texto do alerta, e quando limpa).
  */
 
 export type Estado = 'ok' | 'caido' | 'fora';
@@ -22,8 +24,12 @@ export interface Alvo {
   rotulo: string;
   sistema: NomeSistema;
   caminho: string;
-  /** Campo booleano da resposta que diz se o login vale. */
+  /** Campo booleano da resposta que diz se o login vale (ou, num alvo de saude, se esta sem alerta). */
   campo: string;
+  /** 'login' (padrao) ou 'saude': muda o texto do aviso. */
+  tipo?: 'login' | 'saude';
+  /** Campo booleano que, quando vier false, tira o alvo da leitura (ex.: ML nao configurado na Central). */
+  ignorarSe?: string;
 }
 
 export const ALVOS: Alvo[] = [
@@ -32,6 +38,8 @@ export const ALVOS: Alvo[] = [
   { id: 'nf.tiny', rotulo: 'Tiny no tiny-pedidos-nf', sistema: 'nf', caminho: '/api/oauth/status', campo: 'authenticated' },
   { id: 'nf.ml', rotulo: 'Mercado Livre no tiny-pedidos-nf', sistema: 'nf', caminho: '/api/oauth/ml/status', campo: 'authenticated' },
   { id: 'actions.ml', rotulo: 'Mercado Livre no ml-actions', sistema: 'actions', caminho: '/api/oauth/ml/status', campo: 'authenticated' },
+  { id: 'ocorrencias.ml', rotulo: 'Mercado Livre na Central de Ocorrencias', sistema: 'ocorrencias', caminho: '/api/admin/ml/status', campo: 'conectado', ignorarSe: 'configurado' },
+  { id: 'backup.saude', rotulo: 'Backup do Tiny', sistema: 'backup', caminho: '/painel/api/estado', campo: 'ok', tipo: 'saude' },
 ];
 
 export interface Leitura {
@@ -39,22 +47,27 @@ export interface Leitura {
   rotulo: string;
   estado: Estado;
   detalhe?: string;
+  tipo?: 'login' | 'saude';
 }
 
 /** Le o estado de todos os alvos agora. Servico sem URL configurada fica de fora. */
 export async function verificar(): Promise<Leitura[]> {
   const s = sistemas();
   const ativos = ALVOS.filter((a) => s[a.sistema].baseUrl);
-  return Promise.all(
-    ativos.map(async (a): Promise<Leitura> => {
+  const leituras = await Promise.all(
+    ativos.map(async (a): Promise<Leitura | null> => {
       try {
         const r = await chamar(a.sistema, a.caminho, { timeoutMs: 15000 });
-        return { id: a.id, rotulo: a.rotulo, estado: r?.[a.campo] === true ? 'ok' : 'caido' };
+        if (a.ignorarSe && r?.[a.ignorarSe] === false) return null;
+        const ok = r?.[a.campo] === true;
+        const detalhe = !ok && a.tipo === 'saude' && Array.isArray(r?.alertas) ? r.alertas.join(' ') : undefined;
+        return { id: a.id, rotulo: a.rotulo, estado: ok ? 'ok' : 'caido', detalhe, tipo: a.tipo };
       } catch (err: any) {
-        return { id: a.id, rotulo: a.rotulo, estado: 'fora', detalhe: err?.message || String(err) };
+        return { id: a.id, rotulo: a.rotulo, estado: 'fora', detalhe: err?.message || String(err), tipo: a.tipo };
       }
     }),
   );
+  return leituras.filter((l): l is Leitura => l !== null);
 }
 
 interface Memoria {
@@ -91,11 +104,13 @@ export function compararEstados(anterior: Map<string, Memoria>, leituras: Leitur
       }
     } else if (l.estado === 'caido') {
       if (!mesmo) {
-        avisos.push(`🔴 ${l.rotulo}: login CAIU. Refaca o login no painel desse sistema.`);
+        avisos.push(l.tipo === 'saude'
+          ? `🔴 ${l.rotulo}: com ALERTA na tela Saude${l.detalhe ? ` (${l.detalhe})` : ''}.`
+          : `🔴 ${l.rotulo}: login CAIU. Refaca o login no painel desse sistema.`);
         avisado = true;
       }
     } else if (antes && antes.estado !== 'ok' && antes.avisado) {
-      avisos.push(`🟢 ${l.rotulo}: voltou.`);
+      avisos.push(l.tipo === 'saude' ? `🟢 ${l.rotulo}: sem alerta de novo.` : `🟢 ${l.rotulo}: voltou.`);
     }
     memoria.set(l.id, { estado: l.estado, vezes, avisado });
   }

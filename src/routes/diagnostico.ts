@@ -18,7 +18,7 @@ export async function diagnosticoRoutes(app: FastifyInstance): Promise<void> {
     const s = sistemas()[nome];
     if (!s) {
       reply.code(404);
-      return { mensagem: `Sistema desconhecido: ${nome}. Use analytics, actions, nf ou ocorrencias.` };
+      return { mensagem: `Sistema desconhecido: ${nome}. Use analytics, actions, nf, ocorrencias ou backup.` };
     }
     if (!s.baseUrl) return { mensagem: `${s.rotulo} sem URL configurada.` };
 
@@ -26,7 +26,8 @@ export async function diagnosticoRoutes(app: FastifyInstance): Promise<void> {
       nf: ['/health', '/api/scheduler', '/api/orders/pending', `/api/sales-report?data=${dataDeHoje()}`, '/api/dashboard?dias=1'],
       analytics: ['/health', '/api/assistente/ferramentas'],
       actions: ['/health', '/api/status'],
-      ocorrencias: ['/healthz', '/api/admin/me'],
+      ocorrencias: ['/healthz', '/api/admin/me', '/api/admin/ml/status'],
+      backup: ['/painel/saude', '/painel/api/estado'],
     };
 
     const cabecalhosDeInteresse = ['server', 'x-powered-by', 'age', 'x-cache', 'cf-cache-status', 'via', 'cache-control'];

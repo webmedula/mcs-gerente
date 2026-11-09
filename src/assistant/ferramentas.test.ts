@@ -10,6 +10,8 @@ process.env.NF_BASE_URL = 'http://nf.test';
 process.env.NF_API_KEY = 'chave-nf';
 process.env.OCORRENCIAS_BASE_URL = 'http://oc.test';
 process.env.OCORRENCIAS_API_KEY = 'mcsia_teste';
+process.env.BACKUP_BASE_URL = 'http://backup.test';
+process.env.BACKUP_API_KEY = 'chave-backup';
 
 const { FERRAMENTAS_LOCAIS, catalogo, executarFerramenta, _limparCacheAnalytics } = await import('./ferramentas');
 
@@ -226,6 +228,8 @@ describe('panorama da operacao', () => {
     rotas['GET http://analytics.test/api/tiny/status'] = { corpo: { authenticated: true } };
     rotas['GET http://nf.test/api/oauth/status'] = { corpo: { authenticated: true } };
     rotas['GET http://nf.test/api/oauth/ml/status'] = { corpo: { authenticated: true } };
+    rotas['GET http://oc.test/api/admin/ml/status'] = { corpo: { configurado: true, conectado: false } };
+    rotas['GET http://backup.test/painel/api/estado'] = { corpo: { versao: '0.9.2', ok: false, alertas: ['Batimento atrasado (12 min).'], servico: { batimentoMin: 12 }, meses: [{ mes: '2026-10', coleta: 'concluida', verificacao: 'ok' }], fila: { abertos: 0 } } };
 
     const r: any = await executarFerramenta('panorama_da_operacao', {});
     expect(r.vendas.ontemContraSemanaPassada.variacaoPercentual).toBe(-30);
@@ -237,8 +241,11 @@ describe('panorama da operacao', () => {
     expect(r.clientes.ocorrencias.semResponsavel).toHaveLength(1);
     expect(r.clientes.devolucoes.erro).toMatch(/Central de Ocorrencias/);
     expect(r.logins['ml-analytics'].mercadoLivre.valido).toBe(false);
+    expect(r.logins['Central de Ocorrencias'].mercadoLivre.valido).toBe(false);
+    expect(r.backupDoTiny.semAlerta).toBe(false);
+    expect(r.backupDoTiny.mesesRecentes[0].mes).toBe('2026-10');
     const texto = r.pontosDeAtencao.join('\n');
-    for (const esperado of ['Vendas de ontem -30%', '1 pedido(s) bloqueado', '1 nota(s) com erro', 'despacho vencendo hoje', 'estoque rompido', 'promocao vencendo', '1 pergunta(s) sem resposta', 'sem responsavel', 'prazo do ML', 'Login do Mercado Livre caiu no ml-analytics']) {
+    for (const esperado of ['Vendas de ontem -30%', '1 pedido(s) bloqueado', '1 nota(s) com erro', 'despacho vencendo hoje', 'estoque rompido', 'promocao vencendo', '1 pergunta(s) sem resposta', 'sem responsavel', 'prazo do ML', 'Login do Mercado Livre caiu no ml-analytics', 'Login do Mercado Livre caiu no Central de Ocorrencias', 'Backup do Tiny: Batimento atrasado']) {
       expect(texto).toContain(esperado);
     }
     expect(r.blocosComFalha).toBe(1);
@@ -248,7 +255,76 @@ describe('panorama da operacao', () => {
     const r: any = await executarFerramenta('panorama_da_operacao', {});
     expect(r.vendas.erro).toBeTruthy();
     expect(r.pontosDeAtencao).toEqual(['Nada pedindo atencao nos dados disponiveis.']);
-    expect(r.blocosComFalha).toBe(8);
+    expect(r.blocosComFalha).toBe(9);
+    expect(r.backupDoTiny.erro).toBeTruthy();
+  });
+});
+
+describe('v1.5: equipe, registro, backup e pedido no Tiny', () => {
+  const equipe = [
+    { id: 1, nome: 'Gerente Teste', email: 'g@x.com', papel: 'gerente', ativo: 1, ultimo_login: '2026-11-09' },
+    { id: 2, nome: 'Bia Fila', email: 'b@x.com', papel: 'atendimento', ativo: 1 },
+    { id: 3, nome: 'Antigo', email: 'a@x.com', papel: 'atendimento', ativo: 0 },
+  ];
+
+  it('equipe: conta a fila de cada pessoa ativa e a sem responsavel, sem e-mail', async () => {
+    rotas['GET http://oc.test/api/admin/usuarios'] = { corpo: equipe };
+    for (const [resp, totais] of [['1', [1, 0, 0]], ['2', [2, 1, 0]], ['nenhum', [3, 0, 0]]] as const) {
+      ['nova', 'em_analise', 'aguardando_cliente'].forEach((st, i) => { rotas[`GET http://oc.test/api/admin/ocorrencias?status=${st}&responsavel=${resp}`] = { corpo: { total: totais[i], itens: [] } }; });
+    }
+    const r: any = await executarFerramenta('ocorrencias_equipe', {});
+    expect(r.pessoasAtivas).toBe(2);
+    expect(r.inativas).toBe(1);
+    expect(r.equipe[0]).toMatchObject({ nome: 'Bia Fila', papel: 'atendimento', fila: { total: 3, porStatus: { nova: 2, em_analise: 1, aguardando_cliente: 0 } } });
+    expect(r.semResponsavel.total).toBe(3);
+    expect(JSON.stringify(r)).not.toContain('b@x.com');
+  });
+
+  it('lista com responsavel por nome: acha a pessoa e filtra pelo id; nome ambiguo ou inexistente vira erro', async () => {
+    rotas['GET http://oc.test/api/admin/usuarios'] = { corpo: [...equipe, { id: 4, nome: 'Ana Dias', papel: 'atendimento', ativo: 1 }] };
+    rotas['GET http://oc.test/api/admin/ocorrencias?responsavel=2'] = { corpo: { itens: [{ protocolo: 'P9', status: 'nova', responsavel: 'Bia Fila' }], total: 1, contagem: {} } };
+    const r: any = await executarFerramenta('ocorrencias_lista', { responsavel: 'bia' });
+    expect(r.itens[0].protocolo).toBe('P9');
+    expect(((await executarFerramenta('ocorrencias_lista', { responsavel: 'zeca' })) as any).erro).toMatch(/Ninguem/);
+    expect(((await executarFerramenta('ocorrencias_lista', { responsavel: 'ia' })) as any).erro).toMatch(/Mais de uma/);
+  });
+
+  it('registro: filtra por texto e nao repassa IP nem e-mail', async () => {
+    rotas['GET http://oc.test/api/admin/registro?so=acessos'] = { corpo: [
+      { id: 2, tipo: 'login', quem: 'Bia Fila', email: 'b@x.com', detalhe: null, ip: '10.0.0.1', criado_em: '2026-11-09 10:00' },
+      { id: 1, tipo: 'login_falhou', quem: 'x@y.com', email: 'x@y.com', detalhe: 'senha errada', ip: '10.0.0.2', criado_em: '2026-11-09 09:00' },
+    ] };
+    const r: any = await executarFerramenta('ocorrencias_registro', { so: 'acessos', busca: 'bia' });
+    expect(r.noFiltro).toBe(1);
+    expect(r.linhas[0]).toMatchObject({ tipo: 'login', quem: 'Bia Fila' });
+    expect(JSON.stringify(r)).not.toContain('10.0.0.1');
+  });
+
+  it('backup: manda x-api-key, resume os meses e le alertas; 404 explica a PANEL_API_KEY', async () => {
+    rotas['GET http://backup.test/painel/api/estado'] = { corpo: { versao: '0.9.2', ok: true, alertas: [], servico: { batimentoMin: 1, janela: { liberada: false, texto: '01:00-06:00' } }, ultimas24h: { resumo: 'Backup do Tiny: resumo', porTipoEResultado: { 'coleta:ok': 2 } }, fila: { abertos: 1, itens: [] }, meses: [{ mes: '2026-10', notasNoTiny: 100, notasNoBackup: 100, coleta: 'concluida', verificacao: 'ok', drive: 'ok', selo: 'SEGURO_PARA_EXCLUSAO', exclusao: 'nenhuma' }, { mes: '2026-09' }, { mes: '2026-08' }, { mes: '2026-07' }], exclusoes: [], robo: { ligado: false }, drive: { configurado: true, envios: [] } } };
+    const r: any = await executarFerramenta('backup_tiny_estado', { meses: 2 });
+    expect(chamadas[0].init.headers['x-api-key']).toBe('chave-backup');
+    expect(r.semAlerta).toBe(true);
+    expect(r.mesesRecentes).toHaveLength(2);
+    expect(r.mesesRecentes[0]).toMatchObject({ mes: '2026-10', selo: 'SEGURO_PARA_EXCLUSAO' });
+    expect(r.resumo24h).toContain('Backup do Tiny');
+    rotas['GET http://backup.test/painel/api/estado'] = { status: 404, corpo: { erro: 'Rota desligada' } };
+    await expect(executarFerramenta('backup_tiny_estado', {})).rejects.toThrow(/PANEL_API_KEY/);
+  });
+
+  it('pedido no Tiny por numero: valida, traduz a situacao e diz se tem nota', async () => {
+    rotas['GET http://nf.test/api/debug/tiny-find/2000123'] = { corpo: { total: 1, itens: [{ id: 77, numeroPedido: 555, situacao: 3, idNotaFiscal: 9, ecommerce: { nome: 'Shopee', numeroPedidoEcommerce: '2000123' }, dataCriacao: '2026-11-08', cliente: { nome: 'Ana' }, valor: '99.90' }] } };
+    const r: any = await executarFerramenta('nf_buscar_pedido', { numero: '2000123' });
+    expect(r.pedidos[0]).toMatchObject({ idTiny: 77, numeroTiny: 555, canal: 'Shopee', situacao: 'enviado', temNotaFiscal: true });
+    expect(((await executarFerramenta('nf_buscar_pedido', { numero: '../x' })) as any).erro).toBeTruthy();
+  });
+
+  it('adesoes: junta as do ml-actions com as do analytics, marcando quem fez', async () => {
+    rotas['GET http://analytics.test/api/promocoes/adesoes'] = { corpo: { items: [{ quando: '2026-11-05', itemId: 'MLB1', status: 'sucesso' }] } };
+    rotas['GET http://actions.test/api/promocoes-historico'] = { corpo: { escritaHabilitada: true, items: [{ quando: '2026-11-07', itemId: 'MLB2', status: 'sucesso' }] } };
+    const r: any = await executarFerramenta('ml_promocoes_aderidas', {});
+    expect(r.total).toBe(2);
+    expect(r.itens.map((i: any) => i.feitoPor)).toEqual(['ml-actions', 'ml-analytics']);
   });
 });
 

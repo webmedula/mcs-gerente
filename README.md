@@ -1,5 +1,14 @@
-# mcs-gerente — v1.4 (2026-11-08)
+# mcs-gerente — v1.5 (2026-11-09)
 
+> **v1.5:** **acesso de leitura a tudo.** (1) **Backup do Tiny** vira o quinto sistema (`BACKUP_BASE_URL` +
+> `BACKUP_API_KEY` = a `PANEL_API_KEY` do mcs-backup-tiny 0.9.2+): ferramenta `backup_tiny_estado` (alertas da
+> tela Saúde, meses coletados/conferidos, Drive, selo, exclusões, robô) e os alertas entram no panorama e no
+> vigia. (2) **Central de Ocorrências completa** (Central v1.12.0 abriu as rotas para a chave da IA):
+> `ocorrencias_equipe` (fila de cada pessoa), `ocorrencias_lista` com `responsavel` por nome,
+> `ocorrencias_registro` (quem fez o que), `ocorrencias_detalhe` com `lancamentosMl`, e o ML da Central no
+> `estado_dos_sistemas`, no panorama e no vigia. (3) `nf_buscar_pedido` acha um pedido no Tiny pelo número do
+> canal; `ml_promocoes_aderidas` junta as adesões feitas pelo ml-actions. Continua somente leitura.
+>
 > **v1.4:** **vigia de logins.** A cada `VIGIA_MINUTOS` (padrão 30; `0` desliga) o Gerente confere os logins
 > do Mercado Livre e do Tiny no ml-analytics, no tiny-pedidos-nf e no ml-actions e manda uma mensagem no
 > Telegram **só quando algo muda**: login caiu, voltou, ou o serviço parou de responder (este só na
@@ -35,8 +44,9 @@ operação pelas APIs de cada um, sem acessar banco de ninguém:
 | **ml-analytics** (v34+) | resumo, top anúncios, margem, reposição, notas, Buy Box, lacunas de custo, SQL, histórico, promoções do ML (v35+) — as ferramentas vêm do próprio analytics; mais perguntas sem resposta e adesões a promoções |
 | **ml-actions** | fila de candidatos à recriação, histórico de recriações, diagnóstico de formato |
 | **tiny-pedidos-nf** | pedidos pendentes, prévia do desconto, processados/erros, lotes, vendas do dia, painel, listas de preço |
-| **Central de Ocorrências** (mcs-ocorrencias) | lista de ocorrências por status/canal/responsável, detalhe de um protocolo (histórico, mensagens do ML, devolução, conta da venda), números do período e fila de devoluções |
-| geral | `panorama_da_operacao`: visão geral dos quatro sistemas com pontos de atenção · `estado_dos_sistemas`: saúde, versões, logins ML/Tiny, agendador de notas |
+| **Central de Ocorrências** (mcs-ocorrencias v1.12.0+) | lista de ocorrências por status/canal/responsável (inclusive a fila de uma pessoa pelo nome), detalhe de um protocolo (histórico, mensagens do ML, devolução, conta da venda, lançamentos brutos do ML), números do período, fila de devoluções, equipe com a fila de cada um, registro de atividades, conexão e faturamento do ML, último backup do banco |
+| **Backup do Tiny** (mcs-backup-tiny 0.9.2+) | `backup_tiny_estado`: alertas da tela Saúde, janela, disco, últimas 24 h, fila, meses (notas no Tiny e no backup, coleta, verificação, Drive, selo), exclusões, robô |
+| geral | `panorama_da_operacao`: visão geral dos cinco sistemas com pontos de atenção · `estado_dos_sistemas`: saúde, versões, logins ML/Tiny (inclusive o ML da Central), agendador de notas, backups |
 
 ## v1 = somente leitura
 
@@ -45,7 +55,9 @@ A trava está no código (`src/sistemas.ts`), não no comportamento do modelo:
 - GET em `/api/*` e `/health` do ml-analytics, ml-actions e tiny-pedidos-nf;
 - POST **só** em `/api/assistente/ferramenta/:nome` do ml-analytics (ferramentas de leitura);
 - na Central de Ocorrências, só os GET de uma lista fechada (lista, detalhe, devoluções, números,
-  modelos): backup, CSV, anexos, equipe e chaves nem saem do Gerente;
+  modelos; desde a v1.5 também equipe, registro, ML, lista de backups e lançamentos do ML): download de
+  backup, CSV, anexos e chaves nem saem do Gerente;
+- no Backup do Tiny, só `GET /painel/api/estado` e o `ok` de `/painel/saude`;
 - qualquer outra coisa é recusada antes de sair do Gerente. Os testes em `src/sistemas.test.ts`
   listam todas as rotas de escrita conhecidas e confirmam que estão bloqueadas.
 
@@ -67,7 +79,9 @@ funciona com ml-actions e tiny-pedidos-nf e avisa que as ferramentas do analytic
    Para a Central de Ocorrências, a chave **não** é a `SERVICE_API_KEY`: crie uma chave do Gerente IA
    no painel da Central (só o gerente vê essa tela), e coloque em `OCORRENCIAS_API_KEY` junto com
    `OCORRENCIAS_BASE_URL`. Sem elas o Gerente funciona normalmente, só sem ocorrências.
-4. Confira `https://SEU-GERENTE/debug/sistemas?key=SUA_SERVICE_API_KEY` — os quatro devem dar `ok: true`.
+   Para o Backup do Tiny, defina `PANEL_API_KEY` no serviço **mcs-backup-tiny** (0.9.2+, `openssl rand -hex 24`)
+   e coloque o mesmo valor em `BACKUP_API_KEY`, com `BACKUP_BASE_URL=https://backup.mcs.ind.br`. Sem elas, sem backup.
+4. Confira `https://SEU-GERENTE/debug/sistemas?key=SUA_SERVICE_API_KEY` — os cinco devem dar `ok: true`.
 5. Confira `https://SEU-GERENTE/debug/assistente?key=...` — provedor, modelo e ferramentas por sistema.
 6. Teste sem Telegram: `https://SEU-GERENTE/debug/perguntar?key=...&q=quanto+vendemos+ontem`.
 
@@ -91,12 +105,15 @@ O bot é o mesmo; só muda para onde o Telegram entrega as mensagens.
 
 ```bash
 npm install
-npm test        # 46 testes, sem chamar nenhum sistema real
+npm test        # 54 testes, sem chamar nenhum sistema real
 npm run dev
 ```
 
 ## Histórico de versões
 
+- **v1.5 (2026-11-09)** — acesso de leitura a tudo: Backup do Tiny como quinto sistema
+  (`backup_tiny_estado`); equipe/fila, registro, ML e backups da Central; `nf_buscar_pedido`; adesões do
+  ml-actions; Central e backup no panorama e no vigia. Pede Central v1.12.0 e mcs-backup-tiny 0.9.2.
 - **v1.4 (2026-11-08)** — vigia de logins (`src/vigia.ts`): confere ML e Tiny nos serviços a cada
   `VIGIA_MINUTOS` e avisa no Telegram só quando muda; `/debug/vigia`.
 - **v1.3 (2026-11-08)** — memória curta por conversa (`src/assistant/memoria.ts`, `/esquecer`);
