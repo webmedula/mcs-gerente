@@ -9,8 +9,10 @@ import { logger } from '../logger';
  *
  * - ml-analytics: as ferramentas NAO ficam aqui. O Gerente pergunta ao analytics quais existem
  *   (GET /api/assistente/ferramentas) e pede pra executar. Ferramenta nova la aparece aqui sozinha.
- * - ml-actions, tiny-pedidos-nf e Central de Ocorrencias: as ferramentas ficam aqui e chamam as rotas GET que os paineis
- *   deles ja usam. Cada uma resume a resposta — lista crua de 300 pedidos nao cabe no contexto.
+ * - ml-actions, tiny-pedidos-nf, Central de Ocorrencias e Backup do Tiny: as ferramentas ficam aqui e chamam as rotas GET
+ *   que os paineis deles ja usam. Cada uma resume a resposta — lista crua de 300 pedidos nao cabe no contexto.
+ * - v1.5 ("acesso a tudo"): equipe e fila de cada pessoa, registro de atividades, ML e backups da Central; estado do
+ *   Backup do Tiny; pedido no Tiny por numero; adesoes feitas pelo ml-actions. Continua so leitura.
  */
 
 export interface DefinicaoDeFerramenta {
@@ -67,6 +69,51 @@ async function ferramentaDoAnalytics(nome: string, entrada: Record<string, unkno
 const variacao = (hoje: number | null | undefined, antes: number | null | undefined): number | null =>
   hoje == null || antes == null || antes === 0 ? null : Math.round(((hoje - antes) / antes) * 1000) / 10;
 
+/** Resumo do GET /painel/api/estado do backup (0.9.2): o que importa pra conversa, sem a lista inteira. */
+function resumoDoBackup(r: any) {
+  const meses: any[] = Array.isArray(r?.meses) ? r.meses : [];
+  return {
+    versao: r?.versao,
+    semAlerta: r?.ok,
+    alertas: r?.alertas ?? [],
+    batimentoHaMinutos: r?.servico?.batimentoMin,
+    janelaDeColeta: r?.servico?.janela,
+    pausas: r?.servico?.pausas,
+    disco: r?.servico?.disco,
+    filaAberta: r?.fila?.abertos,
+    ultimas24h: r?.ultimas24h?.porTipoEResultado,
+    mesesRecentes: meses.slice(0, 3).map((m) => ({ mes: m.mes, notasNoTiny: m.notasNoTiny, notasNoBackup: m.notasNoBackup, coleta: m.coleta, verificacao: m.verificacao, drive: m.drive, selo: m.selo, exclusao: m.exclusao })),
+    robo: r?.robo,
+    drive: r?.drive,
+  };
+}
+
+/** Lancamentos brutos do ML de uma ocorrencia: so o que explica a conta (sem o JSON cru da API). */
+function resumirLancamentosMl(bruto: any) {
+  const linhas: any[] = Array.isArray(bruto) ? bruto : Array.isArray(bruto?.lancamentos) ? bruto.lancamentos : Array.isArray(bruto?.results) ? bruto.results : [];
+  const centavos = (v: unknown) => (typeof v === 'number' ? Math.round(v) / 100 : undefined);
+  return {
+    total: linhas.length,
+    lancamentos: linhas.slice(0, 20).map((l) => ({
+      data: l.data ?? l.date ?? l.period ?? undefined, categoria: l.categoria ?? l.category ?? undefined, tipo: l.tipo ?? l.type ?? undefined,
+      descricao: String(l.descricao ?? l.description ?? l.detail ?? '').slice(0, 120) || undefined,
+      valor: centavos(l.valor_centavos) ?? l.valor ?? l.amount ?? undefined, pedido: l.pedido ?? l.order_id ?? undefined, debitado: l.debitado ?? undefined,
+    })),
+    observacao: linhas.length > 20 ? 'Mostrando os 20 primeiros lancamentos.' : undefined,
+  };
+}
+
+/** Acha alguem da equipe da Central pelo nome (ou parte). Ambiguidade vira erro com as opcoes. */
+async function acharPessoa(nome: string): Promise<{ id: number; nome: string } | { erro: string }> {
+  const busca = nome.trim().toLowerCase();
+  const equipe: any[] = (await chamar('ocorrencias', '/api/admin/usuarios')) ?? [];
+  const ativos = equipe.filter((u) => u.ativo !== 0 && u.ativo !== false);
+  const achados = ativos.filter((u) => String(u.nome ?? '').toLowerCase().includes(busca));
+  if (achados.length === 1) return { id: achados[0].id, nome: achados[0].nome };
+  if (achados.length === 0) return { erro: `Ninguem da equipe da Central se chama "${nome}". Pessoas ativas: ${ativos.map((u) => u.nome).join(', ') || 'nenhuma'}.` };
+  return { erro: `Mais de uma pessoa bate com "${nome}": ${achados.map((u) => u.nome).join(', ')}. Diga o nome completo.` };
+}
+
 // ------------------------------------------------------------------------- ferramentas locais
 
 export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
@@ -76,15 +123,16 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
     definicao: {
       name: 'estado_dos_sistemas',
       description:
-        'Saude dos sistemas da MCS (ml-analytics, ml-actions, tiny-pedidos-nf e Central de Ocorrencias): se estao no ar, versao de cada um, se o login no Mercado Livre e no ' +
-        'Tiny esta valido, se a escrita do ml-actions esta ligada e como esta o agendador automatico de notas ' +
-        '(ligado, intervalo, ultima e proxima execucao). Use quando perguntarem se algo esta funcionando, ' +
+        'Saude dos cinco sistemas da MCS (ml-analytics, ml-actions, tiny-pedidos-nf, Central de Ocorrencias e Backup do Tiny): se estao no ar, versao de cada um, se o login no Mercado Livre e no ' +
+        'Tiny esta valido (inclusive o ML da Central), se a escrita do ml-actions esta ligada, como esta o agendador automatico de notas ' +
+        '(ligado, intervalo, ultima e proxima execucao), o ultimo backup do banco da Central e os alertas do Backup do Tiny. Use quando perguntarem se algo esta funcionando, ' +
         'ou quando outra ferramenta falhar e for preciso entender por que.',
       input_schema: { type: 'object', properties: {} },
     },
     async executar() {
       const s = sistemas();
-      const [aHealth, aMl, aTiny, acHealth, acStatus, nfHealth, nfTiny, nfMl, nfAgenda, ocHealth, ocChave] = await Promise.all([
+      const temBackup = !!s.backup.baseUrl;
+      const [aHealth, aMl, aTiny, acHealth, acStatus, nfHealth, nfTiny, nfMl, nfAgenda, ocHealth, ocChave, ocMl, ocFat, ocBackups, bkEstado] = await Promise.all([
         tentar(() => chamar('analytics', '/health')),
         tentar(() => chamar('analytics', '/api/oauth/ml/status')),
         tentar(() => chamar('analytics', '/api/tiny/status')),
@@ -96,12 +144,23 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
         tentar(() => chamar('nf', '/api/scheduler')),
         tentar(() => chamar('ocorrencias', '/healthz')),
         tentar(() => chamar('ocorrencias', '/api/admin/me')),
+        tentar(() => chamar('ocorrencias', '/api/admin/ml/status')),
+        tentar(() => chamar('ocorrencias', '/api/admin/ml/faturamento')),
+        tentar(() => chamar('ocorrencias', '/api/admin/backups')),
+        temBackup ? tentar(() => chamar('backup', '/painel/api/estado')) : Promise.resolve({ erro: 'Backup do Tiny nao ligado ao Gerente (falta BACKUP_BASE_URL).' }),
       ]);
+      const ultimoBackupCentral = falhou(ocBackups) ? ocBackups : Array.isArray(ocBackups) && ocBackups[0] ? { nome: ocBackups[0].nome, criadoEm: ocBackups[0].criado, total: ocBackups.length } : { nenhum: true };
       return {
         [s.analytics.rotulo]: { health: aHealth, loginMercadoLivre: aMl, loginTiny: aTiny },
         [s.actions.rotulo]: { health: acHealth, status: acStatus },
         [s.nf.rotulo]: { health: nfHealth, loginTiny: nfTiny, loginMercadoLivre: nfMl, agendadorDeNotas: nfAgenda },
-        [s.ocorrencias.rotulo]: { health: ocHealth, chaveDoGerente: ocChave },
+        [s.ocorrencias.rotulo]: {
+          health: ocHealth, chaveDoGerente: ocChave,
+          mercadoLivre: falhou(ocMl) ? ocMl : { configurado: ocMl?.configurado, conectado: ocMl?.conectado, conta: ocMl?.nickname, ultimaSync: ocMl?.ultimaSync, ultimoErro: ocMl?.ultimoErro },
+          faturamentoMl: falhou(ocFat) ? ocFat : { lancamentos: ocFat?.lancamentos, pedidos: ocFat?.pedidos, ultimaSync: ocFat?.ultimaSync, ultimoErro: ocFat?.ultimoErro },
+          ultimoBackupDoBanco: ultimoBackupCentral,
+        },
+        [s.backup.rotulo]: falhou(bkEstado) ? bkEstado : resumoDoBackup(bkEstado),
       };
     },
   },
@@ -115,7 +174,7 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
         'comparadas com o mesmo dia da semana anterior (todos os canais, pelo Tiny); pedidos bloqueados e notas ' +
         'com erro; estoque rompido ou critico no ML; promocoes vencendo e anuncios que ficaram sem promocao; ' +
         'perguntas sem resposta no ML; ocorrencias abertas, sem responsavel e devolucoes aguardando acao; logins ' +
-        'do ML e do Tiny. Cada bloco diz de qual sistema veio e se falhou. Use PRIMEIRO em "como estamos?", ' +
+        'do ML e do Tiny (inclusive o ML da Central); alertas do Backup do Tiny. Cada bloco diz de qual sistema veio e se falhou. Use PRIMEIRO em "como estamos?", ' +
         '"o que preciso fazer hoje?", "resumo do dia" e depois aprofunde so no que pede atencao.',
       input_schema: { type: 'object', properties: {} },
     },
@@ -124,8 +183,9 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
       const ontem = dataEmBrasilia(-1);
       const s = sistemas();
       const temOcorrencias = !!s.ocorrencias.baseUrl;
+      const temBackup = !!s.backup.baseUrl;
 
-      const [painel, vendasOntem, pendentes, reposicao, promocoes, perguntas, buyBox, ocorrencias, devolucoes, mlAnalytics, tinyAnalytics, tinyNf, mlNf] =
+      const [painel, vendasOntem, pendentes, reposicao, promocoes, perguntas, buyBox, ocorrencias, devolucoes, mlAnalytics, tinyAnalytics, tinyNf, mlNf, mlCentral, backup] =
         await Promise.all([
           tentar(() => chamar('nf', '/api/dashboard?dias=9')),
           tentar(() => chamar('nf', `/api/sales-report?data=${ontem}`)),
@@ -140,6 +200,8 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
           tentar(() => chamar('analytics', '/api/tiny/status')),
           tentar(() => chamar('nf', '/api/oauth/status')),
           tentar(() => chamar('nf', '/api/oauth/ml/status')),
+          temOcorrencias ? tentar(() => chamar('ocorrencias', '/api/admin/ml/status')) : Promise.resolve({ erro: 'Central de Ocorrencias nao ligada ao Gerente.' }),
+          temBackup ? tentar(() => chamar('backup', '/painel/api/estado')) : Promise.resolve({ erro: 'Backup do Tiny nao ligado ao Gerente.' }),
         ]);
 
       const atencao: string[] = [];
@@ -261,19 +323,28 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
         }),
       };
 
+      // ---- backup do Tiny: so os alertas da tela Saude dele
+      const backupDoTiny = bloco('Backup do Tiny', backup, (r) => {
+        const alertas: string[] = Array.isArray(r?.alertas) ? r.alertas : [];
+        for (const a of alertas) atencao.push(`Backup do Tiny: ${a}`);
+        return resumoDoBackup(r);
+      });
+
       // ---- logins
       const login = (r: unknown, campo: string) => (falhou(r) ? { erro: r.erro } : { valido: !!(r as any)?.[campo] });
-      const logins = {
+      const logins: Record<string, Record<string, { erro: string } | { valido: boolean }>> = {
         'ml-analytics': { mercadoLivre: login(mlAnalytics, 'authenticated'), tiny: login(tinyAnalytics, 'authenticated') },
         'tiny-pedidos-nf': { tiny: login(tinyNf, 'authenticated'), mercadoLivre: login(mlNf, 'authenticated') },
       };
+      // Central: so conta se o ML estiver configurado la.
+      if (!falhou(mlCentral) && (mlCentral as any)?.configurado !== false) logins['Central de Ocorrencias'] = { mercadoLivre: login(mlCentral, 'conectado') };
       for (const [sis, l] of Object.entries(logins)) {
         for (const [nome, v] of Object.entries(l)) {
           if ('valido' in v && v.valido === false) atencao.push(`Login do ${nome === 'tiny' ? 'Tiny' : 'Mercado Livre'} caiu no ${sis}.`);
         }
       }
 
-      const sistemasComFalha = [painel, pendentes, reposicao, promocoes, perguntas, buyBox, ocorrencias, devolucoes].filter(falhou).length;
+      const sistemasComFalha = [painel, pendentes, reposicao, promocoes, perguntas, buyBox, ocorrencias, devolucoes, backup].filter(falhou).length;
       return {
         geradoEm: new Date().toISOString(),
         hoje,
@@ -284,6 +355,7 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
         estoque,
         mercadoLivre,
         clientes,
+        backupDoTiny,
         logins,
       };
     },
@@ -316,7 +388,7 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
     definicao: {
       name: 'ml_promocoes_aderidas',
       description:
-        'Historico das adesoes a promocoes do Mercado Livre feitas pelo painel do ml-analytics: quando, anuncio, tipo e nome ' +
+        'Historico das adesoes a promocoes do Mercado Livre feitas pelos paineis do ml-analytics e do ml-actions (campo feitoPor): quando, anuncio, tipo e nome ' +
         'da promocao, preco final e se o ML aceitou ou recusou (com o erro). Mais recentes primeiro. Use para "o que ja ' +
         'aderimos?" ou "deu certo a adesao do MLB X?".',
       input_schema: {
@@ -328,17 +400,19 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
       },
     },
     async executar(entrada) {
-      const r = await chamar('analytics', '/api/promocoes/adesoes');
-      let itens: any[] = [...(r?.items ?? [])].sort((a, b) => String(b.quando).localeCompare(String(a.quando)));
+      const [r, ra] = await Promise.all([chamar('analytics', '/api/promocoes/adesoes'), tentar(() => chamar('actions', '/api/promocoes-historico'))]);
+      const doActions: any[] = falhou(ra) ? [] : (ra?.items ?? []).map((i: any) => ({ ...i, feitoPor: 'ml-actions' }));
+      let itens: any[] = [...(r?.items ?? []).map((i: any) => ({ ...i, feitoPor: 'ml-analytics' })), ...doActions].sort((a, b) => String(b.quando).localeCompare(String(a.quando)));
       const porStatus = contarPor(itens, (i) => String(i.status));
       if (entrada?.status) itens = itens.filter((i) => i.status === entrada.status);
       return {
         escritaDePromocoesLigada: r?.escritaHabilitada,
+        mlActions: falhou(ra) ? { erro: ra.erro } : { escritaDePromocoesLigada: ra?.escritaHabilitada },
         total: Object.values(porStatus).reduce((t, n) => t + n, 0),
         porStatus,
         // O corpo enviado ao ML e a resposta crua nao ajudam a responder; o erro em texto sim.
         itens: itens.slice(0, limitar(entrada?.limite, 10)).map((i) => ({
-          quando: i.quando, itemId: i.itemId, titulo: i.titulo, tipo: i.tipo, promocao: i.nome ?? i.promocaoId,
+          quando: i.quando, feitoPor: i.feitoPor, itemId: i.itemId, titulo: i.titulo, tipo: i.tipo, promocao: i.nome ?? i.promocaoId,
           precoFinal: i.precoFinal, status: i.status, erro: i.erro ?? undefined,
         })),
       };
@@ -664,7 +738,7 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
         'Ocorrencias de clientes na Central de Ocorrencias (reclamacoes do formulario e do Mercado Livre): ' +
         'quantas ha em cada status, e a lista filtrada, mais recentes primeiro, com protocolo, canal, pedido, ' +
         'assunto, status, responsavel, prazo do ML, devolucao e pendencia com o ML. Use para "quantas ' +
-        'reclamacoes abertas", "o que esta sem responsavel", "ocorrencias do pedido X" ou "do cliente Y".',
+        'reclamacoes abertas", "o que esta sem responsavel", "a fila da Bia", "ocorrencias do pedido X" ou "do cliente Y".',
       input_schema: {
         type: 'object',
         properties: {
@@ -673,7 +747,8 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
           origem: { type: 'string', enum: ['ml', 'formulario'], description: 'ml = reclamacao aberta no Mercado Livre; formulario = cliente abriu pelo site' },
           pendencia: { type: 'string', enum: ['aguardando', 'creditou', 'negou', 'alguma'], description: 'pendencia de reembolso/credito com o Mercado Livre' },
           semResponsavel: { type: 'boolean', description: 'so as que ninguem da equipe assumiu' },
-          busca: { type: 'string', description: 'protocolo, numero do pedido ou nome do cliente' },
+          responsavel: { type: 'string', description: 'nome (ou parte) de alguem da equipe: so a fila dessa pessoa' },
+          busca: { type: 'string', description: 'protocolo, numero do pedido, nome do cliente ou rastreio da devolucao' },
           limite: { type: 'integer', description: 'quantas listar (1 a 20, padrao 10)' },
         },
       },
@@ -684,6 +759,11 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
       if (typeof entrada?.status === 'string' && !abertas) q.set('status', entrada.status);
       for (const k of ['canal', 'origem', 'pendencia'] as const) if (typeof entrada?.[k] === 'string') q.set(k, entrada[k]);
       if (entrada?.semResponsavel) q.set('responsavel', 'nenhum');
+      else if (typeof entrada?.responsavel === 'string' && entrada.responsavel.trim()) {
+        const pessoa = await acharPessoa(entrada.responsavel);
+        if ('erro' in pessoa) return pessoa;
+        q.set('responsavel', String(pessoa.id));
+      }
       if (typeof entrada?.busca === 'string' && entrada.busca.trim()) q.set('q', entrada.busca.trim().slice(0, 80));
       const limite = limitar(entrada?.limite, 10);
       const qs = q.toString();
@@ -730,14 +810,20 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
         'ache o protocolo antes com ocorrencias_lista (busca).',
       input_schema: {
         type: 'object',
-        properties: { protocolo: { type: 'string', description: 'protocolo da ocorrencia' } },
+        properties: {
+          protocolo: { type: 'string', description: 'protocolo da ocorrencia' },
+          lancamentosMl: { type: 'boolean', description: 'true = traz tambem os lancamentos brutos do faturamento do ML ligados ao pedido (so ocorrencias do Mercado Livre)' },
+        },
         required: ['protocolo'],
       },
     },
     async executar(entrada) {
       const protocolo = String(entrada?.protocolo || '').trim().toUpperCase();
       if (!/^[A-Z0-9-]{4,40}$/.test(protocolo)) return { erro: 'Informe o protocolo da ocorrencia (letras, numeros e hifen).' };
-      const o = await chamar('ocorrencias', `/api/admin/ocorrencias/${protocolo}`);
+      const [o, bruto] = await Promise.all([
+        chamar('ocorrencias', `/api/admin/ocorrencias/${protocolo}`),
+        entrada?.lancamentosMl ? tentar(() => chamar('ocorrencias', `/api/admin/ocorrencias/${protocolo}/ml/financeiro-bruto`)) : Promise.resolve(undefined),
+      ]);
       const ultimos = <T>(l: T[] | undefined, n: number) => (Array.isArray(l) ? l.slice(-n) : []);
       const claim = o?.ml?.claim;
       return {
@@ -787,6 +873,7 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
             }
           : undefined,
         pesquisa: o?.pesquisa ?? undefined,
+        lancamentosMl: bruto === undefined ? undefined : falhou(bruto) ? { erro: bruto.erro } : resumirLancamentosMl(bruto),
       };
     },
   },
@@ -860,6 +947,139 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
       };
     },
   },
+
+  // ---------------------------------------------------------------- Central: equipe, fila e registro (v1.5)
+  {
+    sistema: 'ocorrencias',
+    definicao: {
+      name: 'ocorrencias_equipe',
+      description:
+        'Equipe da Central de Ocorrencias e a FILA de cada pessoa: quem e (nome, papel gerente/atendimento, ativo, ' +
+        'ultimo login) e quantas ocorrencias abertas cada um tem, por status, mais as sem responsavel. Use para ' +
+        '"como esta a carga da equipe?", "quem esta com mais casos?", "a Bia tem o que na fila?". Para ver os casos de ' +
+        'uma pessoa, use ocorrencias_lista com responsavel.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    async executar() {
+      const equipe: any[] = (await chamar('ocorrencias', '/api/admin/usuarios')) ?? [];
+      const abertos = ['nova', 'em_analise', 'aguardando_cliente'];
+      const contar = async (responsavel: string) => {
+        const porStatus: Record<string, number> = {};
+        await Promise.all(abertos.map(async (st) => {
+          const r = await chamar('ocorrencias', `/api/admin/ocorrencias?status=${st}&responsavel=${responsavel}`);
+          porStatus[st] = Number(r?.total ?? 0);
+        }));
+        return { total: Object.values(porStatus).reduce((t, n) => t + n, 0), porStatus };
+      };
+      const ativos = equipe.filter((u) => u.ativo !== 0 && u.ativo !== false);
+      const [filas, semResponsavel] = await Promise.all([
+        Promise.all(ativos.map(async (u) => ({ nome: u.nome, papel: u.papel, ultimoLogin: u.ultimo_login ?? null, fila: await tentar(() => contar(String(u.id))) }))),
+        tentar(() => contar('nenhum')),
+      ]);
+      return {
+        pessoasAtivas: ativos.length,
+        inativas: equipe.length - ativos.length,
+        semResponsavel,
+        equipe: filas.sort((a, b) => (falhou(b.fila) ? 0 : b.fila.total) - (falhou(a.fila) ? 0 : a.fila.total)),
+        observacao: 'Contagem de ocorrencias nao resolvidas por responsavel, direto da Central.',
+      };
+    },
+  },
+  {
+    sistema: 'ocorrencias',
+    definicao: {
+      name: 'ocorrencias_registro',
+      description:
+        'Registro de atividades da Central de Ocorrencias (ultimas 100 linhas): quem fez o que e quando — logins, ' +
+        'alertas, chaves, status mudado, mensagens ao ML, exportacoes. Use para "quem mexeu no caso X?", "a equipe ' +
+        'entrou hoje?", "teve login estranho?". so=acessos traz apenas logins e alertas de seguranca.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          so: { type: 'string', enum: ['acessos', 'tudo'], description: 'acessos = so logins e alertas (padrao: tudo)' },
+          busca: { type: 'string', description: 'filtra pelo tipo, pessoa ou detalhe (ex.: protocolo)' },
+          limite: { type: 'integer', description: '1 a 50, padrao 20' },
+        },
+      },
+    },
+    async executar(entrada) {
+      const r: any[] = (await chamar('ocorrencias', `/api/admin/registro${entrada?.so === 'acessos' ? '?so=acessos' : ''}`)) ?? [];
+      const busca = typeof entrada?.busca === 'string' ? entrada.busca.trim().toLowerCase() : '';
+      const linhas = busca
+        ? r.filter((l) => [l.tipo, l.quem, l.detalhe].some((v) => String(v ?? '').toLowerCase().includes(busca)))
+        : r;
+      return {
+        lidas: r.length,
+        noFiltro: linhas.length,
+        porTipo: contarPor(linhas, (l: any) => String(l.tipo)),
+        // IP e e-mail ficam na Central: a conversa precisa de quem, o que e quando.
+        linhas: linhas.slice(0, limitar(entrada?.limite, 20, 50)).map((l) => ({ em: l.criado_em, tipo: l.tipo, quem: l.quem, detalhe: l.detalhe ? String(l.detalhe).slice(0, 200) : undefined })),
+      };
+    },
+  },
+
+  // ---------------------------------------------------------------- tiny-pedidos-nf: pedido por numero (v1.5)
+  {
+    sistema: 'nf',
+    definicao: {
+      name: 'nf_buscar_pedido',
+      description:
+        'Acha um pedido no Tiny pelo NUMERO DO PEDIDO NO CANAL (numero do Mercado Livre, Shopee ou TikTok), em qualquer ' +
+        'situacao e data: situacao, canal, data, cliente, valor e se ja tem nota fiscal. Use para "cade o pedido X?", ' +
+        '"o pedido X ja tem nota?". Para o pedido interno do Tiny e o desconto, use nf_previa_pedido.',
+      input_schema: {
+        type: 'object',
+        properties: { numero: { type: 'string', description: 'numero do pedido no canal de venda' } },
+        required: ['numero'],
+      },
+    },
+    async executar(entrada) {
+      const numero = String(entrada?.numero ?? '').trim();
+      if (!/^[A-Za-z0-9_-]{3,40}$/.test(numero)) return { erro: 'Informe o numero do pedido no canal (letras, numeros, hifen).' };
+      const r = await chamar('nf', `/api/debug/tiny-find/${encodeURIComponent(numero)}`);
+      const situacoes: Record<number, string> = { 0: 'aberto', 1: 'aprovado', 2: 'cancelado', 3: 'enviado', 4: 'entregue', 5: 'pronto para envio', 6: 'em separacao', 7: 'pronto para envio', 8: 'faturado', 9: 'dados incompletos' };
+      const itens: any[] = r?.itens ?? [];
+      return {
+        encontrados: r?.total ?? itens.length,
+        pedidos: itens.slice(0, 5).map((p) => ({
+          idTiny: p.id, numeroTiny: p.numeroPedido, numeroNoCanal: p.ecommerce?.numeroPedidoEcommerce ?? numero,
+          canal: p.ecommerce?.nome ?? p.ecommerce?.canalVenda ?? undefined,
+          situacao: typeof p.situacao === 'number' ? (situacoes[p.situacao] ?? `codigo ${p.situacao}`) : p.situacao,
+          criadoEm: p.dataCriacao, dataPrevista: p.dataPrevista, cliente: p.cliente?.nome, valor: p.valor, temNotaFiscal: !!p.idNotaFiscal,
+        })),
+        observacao: 'A situacao vem do codigo do Tiny; se o nome parecer estranho, confira pelo painel.',
+      };
+    },
+  },
+
+  // ---------------------------------------------------------------- Backup do Tiny (v1.5)
+  {
+    sistema: 'backup',
+    definicao: {
+      name: 'backup_tiny_estado',
+      description:
+        'Estado do BACKUP DO TINY (mcs-backup-tiny): se esta sem alerta, os alertas da tela Saude (batimento, disco, token ' +
+        'do Tiny, limite de chamadas), janela de coleta, o que rodou nas ultimas 24 h, fila, os ultimos meses (notas no Tiny ' +
+        'e no backup, coleta, verificacao, Google Drive, selo de seguro para exclusao), exclusoes em andamento, robo de exclusao ' +
+        'e envios ao Drive. Use para "o backup esta em dia?", "o mes passado ja foi conferido?", "pode excluir do Tiny?".',
+      input_schema: { type: 'object', properties: { meses: { type: 'integer', description: 'quantos meses recentes listar (1 a 6, padrao 3)' } } },
+    },
+    async executar(entrada) {
+      const r = await chamar('backup', '/painel/api/estado');
+      const resumo = resumoDoBackup(r);
+      const n = limitar(entrada?.meses, 3, 6);
+      return {
+        ...resumo,
+        mesesRecentes: (Array.isArray(r?.meses) ? r.meses : []).slice(0, n).map((m: any) => ({
+          mes: m.mes, notasNoTiny: m.notasNoTiny, notasNoBackup: m.notasNoBackup, coleta: m.coleta, coletaEm: m.coletaEm,
+          verificacao: m.verificacao, verificadaEm: m.verificadaEm, vps: m.vps, drive: m.drive, temCopiaExterna: m.temCopiaExterna, selo: m.selo, exclusao: m.exclusao,
+        })),
+        resumo24h: r?.ultimas24h?.resumo,
+        fila: r?.fila,
+        exclusoes: r?.exclusoes,
+      };
+    },
+  },
 ];
 
 // ------------------------------------------------------------------ ferramentas do ml-analytics
@@ -912,7 +1132,11 @@ export async function catalogo(forcar = false): Promise<CatalogoDeFerramentas> {
     avisos.push('A Central de Ocorrencias nao esta ligada ao Gerente (falta OCORRENCIAS_BASE_URL). ' +
       'Perguntas sobre reclamacoes e devolucoes de clientes nao podem ser respondidas por aqui.');
   }
-  const locais = FERRAMENTAS_LOCAIS.filter((f) => !(semOcorrencias && f.sistema === 'ocorrencias'));
+  const semBackup = !sistemas().backup.baseUrl;
+  if (semBackup) {
+    avisos.push('O Backup do Tiny nao esta ligado ao Gerente (falta BACKUP_BASE_URL). Perguntas sobre o backup nao podem ser respondidas por aqui.');
+  }
+  const locais = FERRAMENTAS_LOCAIS.filter((f) => !(semOcorrencias && f.sistema === 'ocorrencias') && !(semBackup && f.sistema === 'backup'));
   const porSistema: Record<string, string[]> = { analytics: doAnalytics.map((f) => f.name) };
   for (const f of locais) (porSistema[f.sistema] ??= []).push(f.definicao.name);
   return {

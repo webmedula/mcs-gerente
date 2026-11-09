@@ -4,7 +4,7 @@ const semBarraFinal = (s: string) => s.replace(/\/+$/, '');
 
 export const config = {
   /** Versao — atualize a cada release. Exibida em /health e no /start do bot. */
-  appVersion: 'gerente v1.3 (2026-11-08)',
+  appVersion: 'gerente v1.5 (2026-11-09)',
 
   port: Number(process.env.PORT || 3020),
   /** Protege /debug/* deste servico (aceita x-api-key ou ?key=). */
@@ -26,6 +26,11 @@ export const config = {
    * criada no painel da Central (Equipe > Chaves do Gerente IA), enviada como Bearer. */
   ocorrenciasBaseUrl: semBarraFinal(process.env.OCORRENCIAS_BASE_URL || ''),
   ocorrenciasApiKey: process.env.OCORRENCIAS_API_KEY || '',
+
+  /** Backup do Tiny (mcs-backup-tiny 0.9.2+, v1.5). A chave e a PANEL_API_KEY daquele servico, enviada como
+   * x-api-key. So a rota de estado em JSON; o painel dele continua so por login. */
+  backupBaseUrl: semBarraFinal(process.env.BACKUP_BASE_URL || ''),
+  backupApiKey: process.env.BACKUP_API_KEY || '',
 
   /** Tempo maximo de espera por um sistema. O Tiny as vezes demora; mais que isso o Telegram
    * fica sem resposta e o usuario pergunta de novo. */
@@ -56,6 +61,10 @@ export const config = {
    * minutos. MEMORIA_TROCAS=0 desliga. */
   memoriaTrocas: Number(process.env.MEMORIA_TROCAS || 10),
   memoriaMinutos: Number(process.env.MEMORIA_MINUTOS || 180),
+
+  /** Vigia de logins (v1.4): a cada N minutos confere os logins do ML e do Tiny nos servicos e
+   * avisa no Telegram so quando algo muda. 0 desliga. */
+  vigiaMinutos: Number(process.env.VIGIA_MINUTOS || 30),
 
   // --- Telegram ------------------------------------------------------------------------------
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',

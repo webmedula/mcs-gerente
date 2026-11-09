@@ -1,7 +1,7 @@
 import { config } from './config';
 
 /**
- * CLIENTE DOS QUATRO SISTEMAS DA MCS.
+ * CLIENTE DOS CINCO SISTEMAS DA MCS.
  *
  * v1 e SOMENTE LEITURA, e isso nao depende do modelo "se comportar": a trava esta aqui.
  * - GET em qualquer rota /api/ ou /health.
@@ -13,9 +13,12 @@ import { config } from './config';
  * Central de Ocorrencias (mcs-ocorrencias): alem da trava geral, so passam os GET da lista
  * GET_PERMITIDO abaixo. La tem rotas GET que baixam backup, CSV com dados pessoais e anexos; a
  * Central ja recusa a chave da IA nelas, mas aqui elas nem saem do Gerente.
+ *
+ * Backup do Tiny (mcs-backup-tiny): so a rota de estado em JSON e o 'ok' de saude. O painel dele e
+ * por login de pessoa; a chave PANEL_API_KEY nao abre mais nada la.
  */
 
-export type NomeSistema = 'analytics' | 'actions' | 'nf' | 'ocorrencias';
+export type NomeSistema = 'analytics' | 'actions' | 'nf' | 'ocorrencias' | 'backup';
 
 export interface Sistema {
   nome: NomeSistema;
@@ -34,6 +37,7 @@ export function sistemas(): Record<NomeSistema, Sistema> {
     actions: { nome: 'actions', rotulo: 'ml-actions', baseUrl: config.actionsBaseUrl, apiKey: config.actionsApiKey, autenticacao: 'x-api-key', rotaSaude: '/health' },
     nf: { nome: 'nf', rotulo: 'tiny-pedidos-nf', baseUrl: config.nfBaseUrl, apiKey: config.nfApiKey, autenticacao: 'x-api-key', rotaSaude: '/health' },
     ocorrencias: { nome: 'ocorrencias', rotulo: 'Central de Ocorrencias', baseUrl: config.ocorrenciasBaseUrl, apiKey: config.ocorrenciasApiKey, autenticacao: 'bearer', rotaSaude: '/healthz' },
+    backup: { nome: 'backup', rotulo: 'Backup do Tiny', baseUrl: config.backupBaseUrl, apiKey: config.backupApiKey, autenticacao: 'x-api-key', rotaSaude: '/painel/saude' },
   };
 }
 
@@ -48,6 +52,7 @@ const POST_PERMITIDO: Record<NomeSistema, RegExp[]> = {
   actions: [],
   nf: [],
   ocorrencias: [],
+  backup: [],
 };
 
 /** Sistemas com lista fechada de GET. Quem nao esta aqui aceita qualquer GET em /api/. */
@@ -61,7 +66,16 @@ const GET_PERMITIDO: Partial<Record<NomeSistema, RegExp[]>> = {
     /^\/api\/admin\/devolucoes$/,
     /^\/api\/admin\/estatisticas$/,
     /^\/api\/admin\/modelos$/,
+    // v1.5 (Central v1.12.0): leitura que antes era so do gerente humano. Downloads de backup continuam fora.
+    new RegExp(`^/api/admin/ocorrencias/${PROTOCOLO}/devolucao$`),
+    new RegExp(`^/api/admin/ocorrencias/${PROTOCOLO}/ml/financeiro-bruto$`),
+    /^\/api\/admin\/usuarios$/,
+    /^\/api\/admin\/ml\/status$/,
+    /^\/api\/admin\/ml\/faturamento$/,
+    /^\/api\/admin\/backups$/,
+    /^\/api\/admin\/registro$/,
   ],
+  backup: [/^\/painel\/saude$/, /^\/painel\/api\/estado$/],
 };
 
 export class RequisicaoRecusada extends Error {}
@@ -126,6 +140,7 @@ export async function chamar(
 
   if (res.status === 401) throw new ErroDoSistema(`${s.rotulo} recusou a chave (401). Confira a chave dele no Gerente.`, 401);
   if (res.status === 403 && nome === 'ocorrencias') throw new ErroDoSistema(`${s.rotulo}: essa consulta e so para pessoas logadas no painel, a chave da IA nao tem acesso.`, 403);
+  if (res.status === 404 && nome === 'backup') throw new ErroDoSistema(`${s.rotulo}: a rota de estado esta desligada (falta PANEL_API_KEY no servico de backup, versao 0.9.2+).`, 404);
   if (!res.ok) throw new ErroDoSistema(corpo?.mensagem || corpo?.erro || `${s.rotulo} respondeu HTTP ${res.status}.`, res.status);
   return corpo;
 }

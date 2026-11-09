@@ -81,7 +81,7 @@ export async function telegramRoutes(app: FastifyInstance): Promise<void> {
 
     if (texto === '/start' || texto === '/ajuda') {
       await enviar(chatId,
-        `Gerente da MCS (${config.appVersion}). Consulto ml-analytics, ml-actions, tiny-pedidos-nf e a Central de Ocorrencias.\n\n` +
+        `Gerente da MCS (${config.appVersion}). Consulto ml-analytics, ml-actions, tiny-pedidos-nf, a Central de Ocorrencias e o Backup do Tiny.\n\n` +
         'Exemplos:\n\n' +
         '- quanto vendemos ontem em todos os canais?\n' +
         '- quais anuncios dao mais lucro?\n' +
@@ -90,6 +90,9 @@ export async function telegramRoutes(app: FastifyInstance): Promise<void> {
         '- alguma nota deu erro hoje?\n' +
         '- quais anuncios estao na fila de recriacao?\n' +
         '- quantas reclamacoes estao abertas sem responsavel?\n' +
+        '- o que esta na fila de cada pessoa da equipe?\n' +
+        '- o backup do Tiny esta em dia?\n' +
+        '- cade o pedido 12345 no Tiny?\n' +
         '- os sistemas estao todos funcionando?\n' +
         '- como esta a operacao hoje? o que preciso fazer?\n\n' +
         'Eu lembro das ultimas mensagens desta conversa; /esquecer limpa.\n' +
