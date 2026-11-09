@@ -1,5 +1,9 @@
-# mcs-gerente — v1.5 (2026-11-09)
+# mcs-gerente — v1.5.1 (2026-11-09)
 
+> **v1.5.1:** **senha do painel de vendas do nf.** O tiny-pedidos-nf protege `/api/dashboard` e `/api/sales-report`
+> com uma segunda senha (`DASHBOARD_PASSWORD`, cabeçalho `x-dashboard-key`), além da `SERVICE_API_KEY`. Era isso o
+> "401 do nf" no panorama e nas vendas do dia. Copie o valor para `NF_DASHBOARD_KEY` no Gerente; o erro agora diz isso.
+>
 > **v1.5:** **acesso de leitura a tudo.** (1) **Backup do Tiny** vira o quinto sistema (`BACKUP_BASE_URL` +
 > `BACKUP_API_KEY` = a `PANEL_API_KEY` do mcs-backup-tiny 0.9.2+): ferramenta `backup_tiny_estado` (alertas da
 > tela Saúde, meses coletados/conferidos, Drive, selo, exclusões, robô) e os alertas entram no panorama e no
@@ -75,7 +79,8 @@ funciona com ml-actions e tiny-pedidos-nf e avisa que as ferramentas do analytic
 2. No EasyPanel, crie o serviço **mcs-gerente** no mesmo projeto, com essa imagem, porta **3020**
    e domínio próprio. Não precisa de volume (o Gerente não guarda dados).
 3. Variáveis: ver `.env.example`. As do assistente e do Telegram são **as mesmas** que estão hoje
-   no ml-analytics. As chaves `*_API_KEY` são a `SERVICE_API_KEY` de cada sistema.
+   no ml-analytics. As chaves `*_API_KEY` são a `SERVICE_API_KEY` de cada sistema. Se o tiny-pedidos-nf tiver
+   `DASHBOARD_PASSWORD`, copie o valor para `NF_DASHBOARD_KEY` (vendas do dia e painel exigem essa segunda senha).
    Para a Central de Ocorrências, a chave **não** é a `SERVICE_API_KEY`: crie uma chave do Gerente IA
    no painel da Central (só o gerente vê essa tela), e coloque em `OCORRENCIAS_API_KEY` junto com
    `OCORRENCIAS_BASE_URL`. Sem elas o Gerente funciona normalmente, só sem ocorrências.
@@ -105,12 +110,14 @@ O bot é o mesmo; só muda para onde o Telegram entrega as mensagens.
 
 ```bash
 npm install
-npm test        # 54 testes, sem chamar nenhum sistema real
+npm test        # 56 testes, sem chamar nenhum sistema real
 npm run dev
 ```
 
 ## Histórico de versões
 
+- **v1.5.1 (2026-11-09)** — `NF_DASHBOARD_KEY`: manda o `x-dashboard-key` que o tiny-pedidos-nf exige em
+  `/api/dashboard` e `/api/sales-report`; 401 dessas rotas explica a causa.
 - **v1.5 (2026-11-09)** — acesso de leitura a tudo: Backup do Tiny como quinto sistema
   (`backup_tiny_estado`); equipe/fila, registro, ML e backups da Central; `nf_buscar_pedido`; adesões do
   ml-actions; Central e backup no panorama e no vigia. Pede Central v1.12.0 e mcs-backup-tiny 0.9.2.

@@ -29,13 +29,18 @@ export interface Sistema {
   autenticacao: 'x-api-key' | 'bearer';
   /** Rota aberta de saude (a Central usa /healthz). */
   rotaSaude: string;
+  /** Cabecalhos a mais em toda chamada (v1.5.1: a senha do painel de vendas do nf). */
+  cabecalhosExtras?: Record<string, string>;
 }
 
 export function sistemas(): Record<NomeSistema, Sistema> {
   return {
     analytics: { nome: 'analytics', rotulo: 'ml-analytics', baseUrl: config.analyticsBaseUrl, apiKey: config.analyticsApiKey, autenticacao: 'x-api-key', rotaSaude: '/health' },
     actions: { nome: 'actions', rotulo: 'ml-actions', baseUrl: config.actionsBaseUrl, apiKey: config.actionsApiKey, autenticacao: 'x-api-key', rotaSaude: '/health' },
-    nf: { nome: 'nf', rotulo: 'tiny-pedidos-nf', baseUrl: config.nfBaseUrl, apiKey: config.nfApiKey, autenticacao: 'x-api-key', rotaSaude: '/health' },
+    nf: {
+      nome: 'nf', rotulo: 'tiny-pedidos-nf', baseUrl: config.nfBaseUrl, apiKey: config.nfApiKey, autenticacao: 'x-api-key', rotaSaude: '/health',
+      cabecalhosExtras: config.nfDashboardKey ? { 'x-dashboard-key': config.nfDashboardKey } : undefined,
+    },
     ocorrencias: { nome: 'ocorrencias', rotulo: 'Central de Ocorrencias', baseUrl: config.ocorrenciasBaseUrl, apiKey: config.ocorrenciasApiKey, autenticacao: 'bearer', rotaSaude: '/healthz' },
     backup: { nome: 'backup', rotulo: 'Backup do Tiny', baseUrl: config.backupBaseUrl, apiKey: config.backupApiKey, autenticacao: 'x-api-key', rotaSaude: '/painel/saude' },
   };
@@ -43,8 +48,9 @@ export function sistemas(): Record<NomeSistema, Sistema> {
 
 /** Cabecalho com a chave, no formato que cada sistema espera. */
 export function cabecalhoDaChave(s: Sistema): Record<string, string> {
-  if (!s.apiKey) return {};
-  return s.autenticacao === 'bearer' ? { authorization: `Bearer ${s.apiKey}` } : { 'x-api-key': s.apiKey };
+  const extras = s.cabecalhosExtras ?? {};
+  if (!s.apiKey) return { ...extras };
+  return { ...extras, ...(s.autenticacao === 'bearer' ? { authorization: `Bearer ${s.apiKey}` } : { 'x-api-key': s.apiKey }) };
 }
 
 const POST_PERMITIDO: Record<NomeSistema, RegExp[]> = {
@@ -138,6 +144,9 @@ export async function chamar(
     corpo = { texto: texto.slice(0, 300) };
   }
 
+  if (res.status === 401 && corpo?.dashboardAuth) {
+    throw new ErroDoSistema(`${s.rotulo}: o painel de vendas tem senha propria (DASHBOARD_PASSWORD). Coloque o mesmo valor em NF_DASHBOARD_KEY no Gerente.`, 401);
+  }
   if (res.status === 401) throw new ErroDoSistema(`${s.rotulo} recusou a chave (401). Confira a chave dele no Gerente.`, 401);
   if (res.status === 403 && nome === 'ocorrencias') throw new ErroDoSistema(`${s.rotulo}: essa consulta e so para pessoas logadas no painel, a chave da IA nao tem acesso.`, 403);
   if (res.status === 404 && nome === 'backup') throw new ErroDoSistema(`${s.rotulo}: a rota de estado esta desligada (falta PANEL_API_KEY no servico de backup, versao 0.9.2+).`, 404);

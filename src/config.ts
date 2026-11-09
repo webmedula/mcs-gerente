@@ -4,7 +4,7 @@ const semBarraFinal = (s: string) => s.replace(/\/+$/, '');
 
 export const config = {
   /** Versao — atualize a cada release. Exibida em /health e no /start do bot. */
-  appVersion: 'gerente v1.5 (2026-11-09)',
+  appVersion: 'gerente v1.5.1 (2026-11-09)',
 
   port: Number(process.env.PORT || 3020),
   /** Protege /debug/* deste servico (aceita x-api-key ou ?key=). */
@@ -21,6 +21,10 @@ export const config = {
 
   nfBaseUrl: semBarraFinal(process.env.NF_BASE_URL || ''),
   nfApiKey: process.env.NF_API_KEY || '',
+  /** v1.5.1: o tiny-pedidos-nf protege /api/dashboard e /api/sales-report (faturamento) com uma SEGUNDA senha,
+   * DASHBOARD_PASSWORD, no cabecalho x-dashboard-key. Sem ela aqui, vendas do dia e painel voltam 401 mesmo com a
+   * chave certa. Copie o valor de DASHBOARD_PASSWORD do nf. */
+  nfDashboardKey: process.env.NF_DASHBOARD_KEY || '',
 
   /** Central de Ocorrencias (mcs-ocorrencias). A chave NAO e a SERVICE_API_KEY: e uma chave mcsia_
    * criada no painel da Central (Equipe > Chaves do Gerente IA), enviada como Bearer. */
