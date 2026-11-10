@@ -60,6 +60,8 @@ describe('verificar (com fetch simulado)', () => {
       if (url === 'http://analytics.test/api/oauth/ml/status') return new Response(JSON.stringify({ authenticated: true }), { status: 200 });
       if (url === 'http://analytics.test/api/tiny/status') return new Response(JSON.stringify({ authenticated: false, configurado: true }), { status: 200 });
       if (url === 'http://oc.test/api/admin/ml/status') return new Response(JSON.stringify({ configurado: false, conectado: false }), { status: 200 });
+      // Central antiga no ar (sem o guard da v1.12): 403 pra chave da IA
+      if (url === 'http://oc.test/api/admin/ml/status?antiga') return new Response(JSON.stringify({ erro: 'Apenas o gerente pode fazer isso.' }), { status: 403 });
       if (url === 'http://backup.test/painel/api/estado') return new Response(JSON.stringify({ ok: false, alertas: ['Sem batimento do servico.', 'Pouco espaco em disco.'] }), { status: 200 });
       throw new Error('conexao recusada');
     }));
@@ -80,6 +82,27 @@ describe('verificar (com fetch simulado)', () => {
     expect(bk.estado).toBe('caido');
     expect(bk.tipo).toBe('saude');
     expect(bk.detalhe).toBe('Sem batimento do servico. Pouco espaco em disco.');
+  });
+  it('403 (versao antiga no ar) vira "semAcesso": avisa uma vez pedindo deploy, sem dizer "fora do ar"', async () => {
+    (fetch as any).mockImplementation(async (url: string) => {
+      if (url === 'http://oc.test/api/admin/ml/status') return new Response(JSON.stringify({ erro: 'Apenas o gerente pode fazer isso.' }), { status: 403 });
+      return new Response(JSON.stringify({ authenticated: true, ok: true }), { status: 200 });
+    });
+    const r = await verificar();
+    const oc = r.find((l) => l.id === 'ocorrencias.ml')!;
+    expect(oc.estado).toBe('semAcesso');
+    expect(oc.detalhe).toContain('chave da IA nao tem acesso');
+
+    let c = compararEstados(new Map(), [oc]);
+    expect(c.avisos).toHaveLength(1);
+    expect(c.avisos[0]).toContain('⚠️ Mercado Livre na Central de Ocorrencias: a versao desse sistema que esta no ar ainda nao libera');
+    expect(c.avisos[0]).toContain('Faca o deploy da versao mais nova');
+    expect(c.avisos[0]).not.toContain('fora do ar');
+    // Segunda leitura igual: silencio. Depois do deploy, ok: "voltou".
+    c = compararEstados(c.memoria, [oc]);
+    expect(c.avisos).toEqual([]);
+    c = compararEstados(c.memoria, [{ ...oc, estado: 'ok', detalhe: undefined }]);
+    expect(c.avisos).toEqual(['🟢 Mercado Livre na Central de Ocorrencias: voltou.']);
   });
   it('alvo de saude avisa com o texto do alerta e "sem alerta de novo" quando limpa', () => {
     const saude = (estado: 'ok' | 'caido', detalhe?: string) => ({ id: 'b', rotulo: 'Backup do Tiny', estado, detalhe, tipo: 'saude' as const });

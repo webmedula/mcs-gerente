@@ -1,5 +1,9 @@
-# mcs-gerente — v1.5.2 (2026-11-09)
+# mcs-gerente — v1.5.3 (2026-11-10)
 
+> **v1.5.3:** o vigia distingue **"sem acesso" (403)** de "fora do ar": quando a Central (ou outro sistema) responde
+> 403 é porque a versão no ar ainda não libera a consulta para o Gerente; o aviso pede o deploy, sai uma vez e não
+> se repete a cada rodada.
+>
 > **v1.5.2:** `/debug/diagnostico/nf` agora mostra a **versão do Gerente que está no ar** e se a
 > `NF_DASHBOARD_KEY` está configurada (comprimento e hash, nunca o valor), pra saber na hora se o 401 do painel
 > é deploy antigo ou variável faltando/errada.
@@ -114,12 +118,14 @@ O bot é o mesmo; só muda para onde o Telegram entrega as mensagens.
 
 ```bash
 npm install
-npm test        # 56 testes, sem chamar nenhum sistema real
+npm test        # 57 testes, sem chamar nenhum sistema real
 npm run dev
 ```
 
 ## Histórico de versões
 
+- **v1.5.3 (2026-11-10)** — vigia: 403 vira estado `semAcesso` (aviso único pedindo deploy da versão nova), em vez
+  de "serviço fora do ar".
 - **v1.5.2 (2026-11-09)** — `/debug/diagnostico/:sistema` informa `versaoDoGerente` e `cabecalhosExtras`
   (se a `NF_DASHBOARD_KEY` está configurada, com comprimento e hash).
 - **v1.5.1 (2026-11-09)** — `NF_DASHBOARD_KEY`: manda o `x-dashboard-key` que o tiny-pedidos-nf exige em
