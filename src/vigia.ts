@@ -17,7 +17,8 @@ import { enviar } from './routes/telegram';
  * alerta, com o texto do alerta, e quando limpa).
  */
 
-export type Estado = 'ok' | 'caido' | 'fora';
+/** 'semAcesso' = o servico respondeu 403: a chave do Gerente nao tem permissao (versao antiga no ar). */
+export type Estado = 'ok' | 'caido' | 'fora' | 'semAcesso';
 
 export interface Alvo {
   id: string;
@@ -63,6 +64,9 @@ export async function verificar(): Promise<Leitura[]> {
         const detalhe = !ok && a.tipo === 'saude' && Array.isArray(r?.alertas) ? r.alertas.join(' ') : undefined;
         return { id: a.id, rotulo: a.rotulo, estado: ok ? 'ok' : 'caido', detalhe, tipo: a.tipo };
       } catch (err: any) {
+        if (err?.status === 403) {
+          return { id: a.id, rotulo: a.rotulo, estado: 'semAcesso', detalhe: err?.message || String(err), tipo: a.tipo };
+        }
         return { id: a.id, rotulo: a.rotulo, estado: 'fora', detalhe: err?.message || String(err), tipo: a.tipo };
       }
     }),
@@ -86,6 +90,7 @@ interface Memoria {
  * - "caiu" e "voltou" avisam na hora.
  * - "fora do ar" so avisa na SEGUNDA leitura seguida: um timeout isolado nao vira mensagem.
  * - "voltou" so sai se a queda tiver sido avisada: timeout isolado seguido de ok fica em silencio.
+ * - "sem acesso" (403) avisa uma vez, na primeira leitura: nao e queda, e deploy antigo do outro servico.
  */
 export function compararEstados(anterior: Map<string, Memoria>, leituras: Leitura[]): { avisos: string[]; memoria: Map<string, Memoria> } {
   const memoria = new Map<string, Memoria>();
@@ -100,6 +105,11 @@ export function compararEstados(anterior: Map<string, Memoria>, leituras: Leitur
       // Primeira leitura do vigia ja fora: avisa. Mudou pra fora: so quando a segunda leitura confirma.
       if (!antes || (vezes === 2 && !avisado)) {
         avisos.push(`⚠️ ${l.rotulo}: servico fora do ar ou sem responder (${l.detalhe ?? 'sem detalhe'}).`);
+        avisado = true;
+      }
+    } else if (l.estado === 'semAcesso') {
+      if (!mesmo) {
+        avisos.push(`⚠️ ${l.rotulo}: a versao desse sistema que esta no ar ainda nao libera essa consulta para o Gerente. Faca o deploy da versao mais nova (${l.detalhe ?? 'sem detalhe'}).`);
         avisado = true;
       }
     } else if (l.estado === 'caido') {
