@@ -1,6 +1,6 @@
 {
   "name": "mcs-gerente",
-  "version": "1.0.0",
+  "version": "1.6.0",
   "private": true,
   "description": "Gerente da MCS: assistente de IA no Telegram que consulta os tres sistemas (ml-analytics, ml-actions, tiny-pedidos-nf) pelas APIs deles. v1 = somente leitura.",
   "main": "dist/index.js",

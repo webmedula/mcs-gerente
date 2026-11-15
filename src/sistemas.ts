@@ -16,9 +16,12 @@ import { config } from './config';
  *
  * Backup do Tiny (mcs-backup-tiny): so a rota de estado em JSON e o 'ok' de saude. O painel dele e
  * por login de pessoa; a chave PANEL_API_KEY nao abre mais nada la.
+ *
+ * Bot de perguntas do ML (mcs-bot, v1.6): so o estado e as perguntas por anuncio (saude do produto). O painel
+ * dele envia respostas ao ML; nada disso passa por aqui.
  */
 
-export type NomeSistema = 'analytics' | 'actions' | 'nf' | 'ocorrencias' | 'backup';
+export type NomeSistema = 'analytics' | 'actions' | 'nf' | 'ocorrencias' | 'backup' | 'bot';
 
 export interface Sistema {
   nome: NomeSistema;
@@ -43,6 +46,7 @@ export function sistemas(): Record<NomeSistema, Sistema> {
     },
     ocorrencias: { nome: 'ocorrencias', rotulo: 'Central de Ocorrencias', baseUrl: config.ocorrenciasBaseUrl, apiKey: config.ocorrenciasApiKey, autenticacao: 'bearer', rotaSaude: '/healthz' },
     backup: { nome: 'backup', rotulo: 'Backup do Tiny', baseUrl: config.backupBaseUrl, apiKey: config.backupApiKey, autenticacao: 'x-api-key', rotaSaude: '/painel/saude' },
+    bot: { nome: 'bot', rotulo: 'Bot de perguntas', baseUrl: config.botBaseUrl, apiKey: config.botApiKey, autenticacao: 'x-api-key', rotaSaude: '/health' },
   };
 }
 
@@ -59,6 +63,7 @@ const POST_PERMITIDO: Record<NomeSistema, RegExp[]> = {
   nf: [],
   ocorrencias: [],
   backup: [],
+  bot: [],
 };
 
 /** Sistemas com lista fechada de GET. Quem nao esta aqui aceita qualquer GET em /api/. */
@@ -80,8 +85,11 @@ const GET_PERMITIDO: Partial<Record<NomeSistema, RegExp[]>> = {
     /^\/api\/admin\/ml\/faturamento$/,
     /^\/api\/admin\/backups$/,
     /^\/api\/admin\/registro$/,
+    // v1.6 (Central v1.13.0): reclamacoes do periodo por produto, sem dado pessoal.
+    /^\/api\/admin\/saude-produtos$/,
   ],
   backup: [/^\/painel\/saude$/, /^\/painel\/api\/estado$/],
+  bot: [/^\/health$/, /^\/api\/estado$/, /^\/api\/saude-produtos$/],
 };
 
 export class RequisicaoRecusada extends Error {}

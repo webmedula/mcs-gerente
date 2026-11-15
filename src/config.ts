@@ -4,7 +4,7 @@ const semBarraFinal = (s: string) => s.replace(/\/+$/, '');
 
 export const config = {
   /** Versao — atualize a cada release. Exibida em /health e no /start do bot. */
-  appVersion: 'gerente v1.5.3 (2026-11-10)',
+  appVersion: 'gerente v1.6.0 (2026-11-15)',
 
   port: Number(process.env.PORT || 3020),
   /** Protege /debug/* deste servico (aceita x-api-key ou ?key=). */
@@ -35,6 +35,18 @@ export const config = {
    * x-api-key. So a rota de estado em JSON; o painel dele continua so por login. */
   backupBaseUrl: semBarraFinal(process.env.BACKUP_BASE_URL || ''),
   backupApiKey: process.env.BACKUP_API_KEY || '',
+
+  /** Bot de perguntas do ML (mcs-bot 0.12.0+, v1.6). A chave e a BOT_API_KEY daquele servico, enviada como x-api-key. */
+  botBaseUrl: semBarraFinal(process.env.BOT_BASE_URL || ''),
+  botApiKey: process.env.BOT_API_KEY || '',
+
+  /** Relatorio mensal de saude do produto (v1.6): dia do mes e hora (Brasilia) do envio no Telegram. Hora -1 desliga. */
+  relatorioSaudeDia: Number(process.env.RELATORIO_SAUDE_DIA || 1),
+  relatorioSaudeHora: Number(process.env.RELATORIO_SAUDE_HORA ?? 9),
+  /** Reclamacoes de defeito/quebra no mes a partir das quais o produto entra em "cobrar o fornecedor". */
+  saudeMinReclamacoes: Number(process.env.SAUDE_MIN_RECLAMACOES || 2),
+  /** Vezes que a mesma pergunta sobre o produto (medida, compatibilidade, kit...) se repete no mes para pedir correcao do anuncio. */
+  saudeMinPerguntasRepetidas: Number(process.env.SAUDE_MIN_PERGUNTAS_REPETIDAS || 3),
 
   /** Tempo maximo de espera por um sistema. O Tiny as vezes demora; mais que isso o Telegram
    * fica sem resposta e o usuario pergunta de novo. */
