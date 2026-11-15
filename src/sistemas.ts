@@ -85,9 +85,12 @@ const GET_PERMITIDO: Partial<Record<NomeSistema, RegExp[]>> = {
     /^\/api\/admin\/ml\/faturamento$/,
     /^\/api\/admin\/backups$/,
     /^\/api\/admin\/registro$/,
+    // v1.7 (Central v1.14.0): reclamacoes do periodo por produto, sem dado pessoal.
+    /^\/api\/admin\/saude-produtos$/,
   ],
   backup: [/^\/painel\/saude$/, /^\/painel\/api\/estado$/],
-  bot: [/^\/health$/, /^\/api\/estado$/],
+  // v1.7 (mcs-bot 0.12.0): perguntas do periodo por anuncio, para a saude do produto.
+  bot: [/^\/health$/, /^\/api\/estado$/, /^\/api\/saude-produtos$/],
 };
 
 export class RequisicaoRecusada extends Error {}
