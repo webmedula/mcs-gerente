@@ -1,5 +1,12 @@
-# mcs-gerente — v1.5.3 (2026-11-10)
+# mcs-gerente — v1.6.0 (2026-11-15)
 
+> **v1.6.0:** **bot de perguntas** vira o sexto sistema (`BOT_BASE_URL` = `https://bot.mcs.ind.br` + `BOT_API_KEY` = a
+> `BOT_API_KEY` do mcs-bot). Ferramenta `bot_perguntas_estado` (perguntas por situação, pendentes recentes, tempo de
+> resposta em 30 dias, envio ligado ou não, respostas prontas, correções e as pendentes com sugestão), o bot entra no
+> `estado_dos_sistemas` e no panorama, e o vigia avisa quando cai o login do Mercado Livre no bot. Só `GET /api/estado`
+> e `/health` passam pela trava; o painel do bot (aprovar e enviar) continua só por senha de pessoa. A planilha de
+> compras do ml-analytics v51 (`planejamento_de_compras`) chega sozinha, como toda ferramenta do analytics.
+>
 > **v1.5.3:** o vigia distingue **"sem acesso" (403)** de "fora do ar": quando a Central (ou outro sistema) responde
 > 403 é porque a versão no ar ainda não libera a consulta para o Gerente; o aviso pede o deploy, sai uma vez e não
 > se repete a cada rodada.

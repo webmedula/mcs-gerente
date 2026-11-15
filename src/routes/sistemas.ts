@@ -15,13 +15,14 @@ export async function sistemasRoutes(app: FastifyInstance): Promise<void> {
       }
     };
     // Rotas /api/ de proposito: /health e aberta e nao provaria que a chave esta certa.
-    const [a, ac, nf, oc, bk] = await Promise.all([
+    const [a, ac, nf, oc, bk, bot] = await Promise.all([
       testar('analytics', '/api/assistente/ferramentas'),
       testar('actions', '/api/status'),
       testar('nf', '/api/scheduler'),
       testar('ocorrencias', '/api/admin/me'),
       testar('backup', '/painel/api/estado'),
+      testar('bot', '/api/estado'),
     ]);
-    return { [s.analytics.rotulo]: a, [s.actions.rotulo]: ac, [s.nf.rotulo]: nf, [s.ocorrencias.rotulo]: oc, [s.backup.rotulo]: bk };
+    return { [s.analytics.rotulo]: a, [s.actions.rotulo]: ac, [s.nf.rotulo]: nf, [s.ocorrencias.rotulo]: oc, [s.backup.rotulo]: bk, [s.bot.rotulo]: bot };
   });
 }

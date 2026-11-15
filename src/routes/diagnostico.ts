@@ -19,7 +19,7 @@ export async function diagnosticoRoutes(app: FastifyInstance): Promise<void> {
     const s = sistemas()[nome];
     if (!s) {
       reply.code(404);
-      return { mensagem: `Sistema desconhecido: ${nome}. Use analytics, actions, nf, ocorrencias ou backup.` };
+      return { mensagem: `Sistema desconhecido: ${nome}. Use analytics, actions, nf, ocorrencias, backup ou bot.` };
     }
     if (!s.baseUrl) return { mensagem: `${s.rotulo} sem URL configurada.` };
 
@@ -29,6 +29,7 @@ export async function diagnosticoRoutes(app: FastifyInstance): Promise<void> {
       actions: ['/health', '/api/status'],
       ocorrencias: ['/healthz', '/api/admin/me', '/api/admin/ml/status'],
       backup: ['/painel/saude', '/painel/api/estado'],
+      bot: ['/health', '/api/estado'],
     };
 
     const cabecalhosDeInteresse = ['server', 'x-powered-by', 'age', 'x-cache', 'cf-cache-status', 'via', 'cache-control'];
