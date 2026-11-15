@@ -85,7 +85,7 @@ const GET_PERMITIDO: Partial<Record<NomeSistema, RegExp[]>> = {
     /^\/api\/admin\/ml\/faturamento$/,
     /^\/api\/admin\/backups$/,
     /^\/api\/admin\/registro$/,
-    // v1.6 (Central v1.13.0): reclamacoes do periodo por produto, sem dado pessoal.
+    // v1.6 (Central v1.14.0): reclamacoes do periodo por produto, sem dado pessoal.
     /^\/api\/admin\/saude-produtos$/,
   ],
   backup: [/^\/painel\/saude$/, /^\/painel\/api\/estado$/],

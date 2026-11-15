@@ -2,7 +2,7 @@
 
 > **v1.6:** **saúde do produto.** Todo mês (dia `RELATORIO_SAUDE_DIA`, padrão 1, às `RELATORIO_SAUDE_HORA`, padrão 9h de
 > Brasília; `-1` desliga) o Gerente junta por produto (SKU, ou o anúncio MLB) as reclamações da Central de Ocorrências
-> (v1.13.0+, `GET /api/admin/saude-produtos`), as perguntas que se repetem no anúncio (mcs-bot 0.12.0+, `GET /api/saude-produtos`)
+> (v1.14.0+, `GET /api/admin/saude-produtos`), as perguntas que se repetem no anúncio (mcs-bot 0.12.0+, `GET /api/saude-produtos`)
 > e a nota do anúncio (ml-analytics `/api/ratings`; SKU e unidades por anúncio de `/api/margem`) e manda no Telegram três
 > listas: **cobrar o fornecedor** (defeito, quebra, peça faltando; a partir de `SAUDE_MIN_RECLAMACOES`, padrão 2),
 > **corrigir o anúncio** (a mesma pergunta sobre medida/compatibilidade/kit/instalação/original `SAUDE_MIN_PERGUNTAS_REPETIDAS`
