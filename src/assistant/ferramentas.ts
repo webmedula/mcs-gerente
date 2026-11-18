@@ -1126,6 +1126,51 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
       };
     },
   },
+  // ---------------------------------------------------------------- Saude do produto (v1.7)
+  {
+    sistema: 'geral',
+    definicao: {
+      name: 'saude_dos_produtos',
+      description:
+        'SAUDE DO PRODUTO num mes: junta por produto (SKU, ou anuncio MLB) as reclamacoes da Central de Ocorrencias (motivo do ML, ' +
+        'o que a equipe viu na devolucao, prejuizo), as perguntas que se repetem no anuncio (bot de perguntas) e a nota do anuncio ' +
+        '(ml-analytics). Devolve tres listas de acao: cobrar o fornecedor (defeito, quebra, peca faltando), corrigir o anuncio ' +
+        '(perguntas repetidas sobre medida/compatibilidade/kit, "diferente do anunciado") e nota baixa, mais o link da pagina completa. ' +
+        'Use para "como esta o produto X?", "o que cobrar do fornecedor?", "quais anuncios corrigir?", "relatorio de saude do mes". ' +
+        'Com "busca" (parte do titulo, SKU ou MLB) traz o detalhe so daquele produto.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          mes: { type: 'string', description: 'AAAA-MM. Padrao: o ultimo mes fechado.' },
+          busca: { type: 'string', description: 'parte do titulo, SKU ou MLB para ver um produto so' },
+          limite: { type: 'integer', description: 'itens por lista (1 a 15, padrao 5)' },
+        },
+      },
+    },
+    async executar(entrada) {
+      const m = await import('../saudeProduto');
+      const mes = typeof entrada?.mes === 'string' && /^\d{4}-\d{2}$/.test(entrada.mes) ? entrada.mes : m.ultimoMesFechado();
+      const r = await m.relatorioDoMes(mes);
+      const link = m.linkDoRelatorio(mes);
+      const busca = typeof entrada?.busca === 'string' ? entrada.busca.trim().toLowerCase() : '';
+      if (busca) {
+        const achados = r.produtos.filter((p) => p.titulo.toLowerCase().includes(busca) || (p.sku ?? '').toLowerCase().includes(busca) || p.anuncios.some((a) => a.toLowerCase().includes(busca)));
+        return { mes: r.periodo.nome, encontrados: achados.length, produtos: achados.slice(0, 5), faltou: r.faltou, link,
+          observacao: achados.length ? undefined : 'Nenhum produto com reclamacao, pergunta ou nota baixa no mes bate com a busca (pode estar saudavel).' };
+      }
+      const n = limitar(entrada?.limite, 5, 15);
+      return {
+        mes: r.periodo.nome,
+        totais: r.totais,
+        cobrarFornecedor: r.cobrarFornecedor.slice(0, n).map((p) => m.linhaFornecedor(p)),
+        corrigirAnuncio: r.corrigirAnuncio.slice(0, n).map((p) => m.linhaAnuncio(p)),
+        notaBaixa: r.notaBaixa.slice(0, n).map((p) => m.linhaNota(p)),
+        quantos: { cobrarFornecedor: r.cobrarFornecedor.length, corrigirAnuncio: r.corrigirAnuncio.length, notaBaixa: r.notaBaixa.length },
+        faltou: r.faltou,
+        link,
+      };
+    },
+  },
 ];
 
 // ------------------------------------------------------------------ ferramentas do ml-analytics
