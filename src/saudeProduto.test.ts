@@ -131,6 +131,25 @@ describe('saúde do produto', () => {
     expect(assinaturaDoMes('2026-10', 'k')).not.toBe(assinaturaDoMes('2026-09', 'k'));
   });
 
+  it('códigos de motivo do ML valem mais que o tipo e saem em português', () => {
+    expect(categoriaDaReclamacao({ tipo: 'defeito', motivoMl: 'repentant_buyer' })).toBe('outros');
+    expect(categoriaDaReclamacao({ tipo: 'troca_devolucao', motivoMl: 'not_working_item' })).toBe('qualidade');
+    expect(categoriaDaReclamacao({ tipo: 'defeito', motivoMl: 'uncompats_item_with_vehicle_acc' })).toBe('anuncio');
+    expect(categoriaDaReclamacao({ tipo: 'defeito', motivoMl: 'different_item_other' })).toBe('entrega');
+    const oc = (m: string, i: number) => rec({ protocolo: `Q${i}`, tipo: 'defeito', motivoMl: m, produtos: [{ itemId: 'MLB70', sku: 'COL-1', titulo: 'Coleira' }] });
+    const f = { ...fontes(), reclamacoes: { ocorrencias: [oc('repentant_buyer', 1), oc('repentant_buyer', 2), oc('repentant_buyer', 3), oc('broken_item', 4)] } };
+    const coleira = montarRelatorio(f, OUT, opcoes).produtos.find((p) => p.sku === 'COL-1')!;
+    expect(coleira.acoes.cobrarFornecedor).toBe(false); // 3 arrependimentos + 1 quebra: não cobra
+    expect(coleira.reclamacoes.motivos[0]).toEqual({ motivo: 'Comprador se arrependeu', vezes: 3 });
+  });
+
+  it('sem SKU, anúncios com o mesmo título viram um produto só', () => {
+    const f = { ...fontes(), notas: { limite: 4, minOpinioes: 1, items: ['MLB81', 'MLB82', 'MLB83'].map((id) => ({ itemId: id, title: 'Farol Led 7 Polegadas', nota: 2.3, totalAvaliacoes: 3 })) } };
+    const r = montarRelatorio(f, OUT, opcoes);
+    expect(r.notaBaixa).toHaveLength(1);
+    expect(r.notaBaixa[0].anuncios).toEqual(['MLB81', 'MLB82', 'MLB83']);
+  });
+
   it('trava de leitura libera só as rotas novas de leitura', () => {
     expect(requisicaoPermitida('ocorrencias', 'GET', '/api/admin/saude-produtos?desde=2026-10-01&ate=2026-10-31')).toBe(true);
     expect(requisicaoPermitida('bot', 'GET', '/api/saude-produtos?desde=2026-10-01')).toBe(true);
