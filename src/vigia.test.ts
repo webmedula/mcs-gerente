@@ -6,6 +6,7 @@ process.env.NF_BASE_URL = 'http://nf.test';
 process.env.ACTIONS_BASE_URL = '';
 process.env.OCORRENCIAS_BASE_URL = 'http://oc.test';
 process.env.BACKUP_BASE_URL = 'http://backup.test';
+process.env.BOT_BASE_URL = 'http://bot.test';
 
 const { compararEstados, verificar, ALVOS } = await import('./vigia');
 type Mem = Map<string, { estado: 'ok' | 'caido' | 'fora'; vezes: number; avisado: boolean }>;
@@ -63,6 +64,7 @@ describe('verificar (com fetch simulado)', () => {
       // Central antiga no ar (sem o guard da v1.12): 403 pra chave da IA
       if (url === 'http://oc.test/api/admin/ml/status?antiga') return new Response(JSON.stringify({ erro: 'Apenas o gerente pode fazer isso.' }), { status: 403 });
       if (url === 'http://backup.test/painel/api/estado') return new Response(JSON.stringify({ ok: false, alertas: ['Sem batimento do servico.', 'Pouco espaco em disco.'] }), { status: 200 });
+      if (url === 'http://bot.test/api/estado') return new Response(JSON.stringify({ mercadoLivre: { appConfigurado: true, conectado: false } }), { status: 200 });
       throw new Error('conexao recusada');
     }));
   });
@@ -82,6 +84,8 @@ describe('verificar (com fetch simulado)', () => {
     expect(bk.estado).toBe('caido');
     expect(bk.tipo).toBe('saude');
     expect(bk.detalhe).toBe('Sem batimento do servico. Pouco espaco em disco.');
+    // v1.6: login do ML no bot, campo aninhado
+    expect(por['bot.ml']).toBe('caido');
   });
   it('403 (versao antiga no ar) vira "semAcesso": avisa uma vez pedindo deploy, sem dizer "fora do ar"', async () => {
     (fetch as any).mockImplementation(async (url: string) => {

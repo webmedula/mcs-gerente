@@ -69,6 +69,22 @@ async function ferramentaDoAnalytics(nome: string, entrada: Record<string, unkno
 const variacao = (hoje: number | null | undefined, antes: number | null | undefined): number | null =>
   hoje == null || antes == null || antes === 0 ? null : Math.round(((hoje - antes) / antes) * 1000) / 10;
 
+/** v1.6: resumo do GET /api/estado do mcs-bot, sem a lista de pendentes. */
+function resumoDoBot(r: any) {
+  return {
+    versao: r?.versao,
+    mercadoLivre: { conectado: r?.mercadoLivre?.conectado, envioPeloBotLigado: r?.mercadoLivre?.envioHabilitado },
+    perguntasPorSituacao: r?.perguntas,
+    pendentesRecentes: r?.pendentesRecentes,
+    perguntaAntigaDias: r?.perguntaAntigaDias,
+    tempoDeResposta30d: r?.tempoDeResposta30d,
+    ultimaSincronizacao: r?.ultimaSincronizacao,
+    respostasProntasAtivas: r?.respostasProntas,
+    correcoes: r?.correcoes,
+    votos: r?.votos,
+  };
+}
+
 /** Resumo do GET /painel/api/estado do backup (0.9.2): o que importa pra conversa, sem a lista inteira. */
 function resumoDoBackup(r: any) {
   const meses: any[] = Array.isArray(r?.meses) ? r.meses : [];
@@ -123,7 +139,7 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
     definicao: {
       name: 'estado_dos_sistemas',
       description:
-        'Saude dos cinco sistemas da MCS (ml-analytics, ml-actions, tiny-pedidos-nf, Central de Ocorrencias e Backup do Tiny): se estao no ar, versao de cada um, se o login no Mercado Livre e no ' +
+        'Saude dos seis sistemas da MCS (ml-analytics, ml-actions, tiny-pedidos-nf, Central de Ocorrencias, Backup do Tiny e bot de perguntas): se estao no ar, versao de cada um, se o login no Mercado Livre e no ' +
         'Tiny esta valido (inclusive o ML da Central), se a escrita do ml-actions esta ligada, como esta o agendador automatico de notas ' +
         '(ligado, intervalo, ultima e proxima execucao), o ultimo backup do banco da Central e os alertas do Backup do Tiny. Use quando perguntarem se algo esta funcionando, ' +
         'ou quando outra ferramenta falhar e for preciso entender por que.',
@@ -132,7 +148,8 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
     async executar() {
       const s = sistemas();
       const temBackup = !!s.backup.baseUrl;
-      const [aHealth, aMl, aTiny, acHealth, acStatus, nfHealth, nfTiny, nfMl, nfAgenda, ocHealth, ocChave, ocMl, ocFat, ocBackups, bkEstado] = await Promise.all([
+      const temBot = !!s.bot.baseUrl;
+      const [aHealth, aMl, aTiny, acHealth, acStatus, nfHealth, nfTiny, nfMl, nfAgenda, ocHealth, ocChave, ocMl, ocFat, ocBackups, bkEstado, botEstado] = await Promise.all([
         tentar(() => chamar('analytics', '/health')),
         tentar(() => chamar('analytics', '/api/oauth/ml/status')),
         tentar(() => chamar('analytics', '/api/tiny/status')),
@@ -148,6 +165,7 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
         tentar(() => chamar('ocorrencias', '/api/admin/ml/faturamento')),
         tentar(() => chamar('ocorrencias', '/api/admin/backups')),
         temBackup ? tentar(() => chamar('backup', '/painel/api/estado')) : Promise.resolve({ erro: 'Backup do Tiny nao ligado ao Gerente (falta BACKUP_BASE_URL).' }),
+        temBot ? tentar(() => chamar('bot', '/api/estado')) : Promise.resolve({ erro: 'Bot de perguntas nao ligado ao Gerente (falta BOT_BASE_URL).' }),
       ]);
       const ultimoBackupCentral = falhou(ocBackups) ? ocBackups : Array.isArray(ocBackups) && ocBackups[0] ? { nome: ocBackups[0].nome, criadoEm: ocBackups[0].criado, total: ocBackups.length } : { nenhum: true };
       return {
@@ -161,6 +179,7 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
           ultimoBackupDoBanco: ultimoBackupCentral,
         },
         [s.backup.rotulo]: falhou(bkEstado) ? bkEstado : resumoDoBackup(bkEstado),
+        [s.bot.rotulo]: falhou(botEstado) ? botEstado : resumoDoBot(botEstado),
       };
     },
   },
@@ -185,7 +204,8 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
       const temOcorrencias = !!s.ocorrencias.baseUrl;
       const temBackup = !!s.backup.baseUrl;
 
-      const [painel, vendasOntem, pendentes, reposicao, promocoes, perguntas, buyBox, ocorrencias, devolucoes, mlAnalytics, tinyAnalytics, tinyNf, mlNf, mlCentral, backup] =
+      const temBot = !!s.bot.baseUrl;
+      const [painel, vendasOntem, pendentes, reposicao, promocoes, perguntas, buyBox, ocorrencias, devolucoes, mlAnalytics, tinyAnalytics, tinyNf, mlNf, mlCentral, backup, bot] =
         await Promise.all([
           tentar(() => chamar('nf', '/api/dashboard?dias=9')),
           tentar(() => chamar('nf', `/api/sales-report?data=${ontem}`)),
@@ -202,6 +222,7 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
           tentar(() => chamar('nf', '/api/oauth/ml/status')),
           temOcorrencias ? tentar(() => chamar('ocorrencias', '/api/admin/ml/status')) : Promise.resolve({ erro: 'Central de Ocorrencias nao ligada ao Gerente.' }),
           temBackup ? tentar(() => chamar('backup', '/painel/api/estado')) : Promise.resolve({ erro: 'Backup do Tiny nao ligado ao Gerente.' }),
+          temBot ? tentar(() => chamar('bot', '/api/estado')) : Promise.resolve({ erro: 'Bot de perguntas nao ligado ao Gerente.' }),
         ]);
 
       const atencao: string[] = [];
@@ -289,6 +310,11 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
               .map((q) => ({ anuncio: q.itemTitle ?? q.itemId, desde: q.dateCreated, pergunta: String(q.text ?? '').slice(0, 160) })),
           };
         }),
+        // v1.6: o bot de perguntas diz quantas esperam aprovacao e quanto tempo levamos para responder
+        botDePerguntas: temBot ? bloco('Bot de perguntas', bot, (r) => {
+          if (r?.mercadoLivre?.conectado === false) atencao.push('Bot de perguntas sem login no Mercado Livre.');
+          return resumoDoBot(r);
+        }) : undefined,
         buyBox: bloco('ml-analytics', buyBox, (r) => {
           const n = r?.totalNoFiltro ?? 0;
           if (n) atencao.push(`${n} anuncio(s) de catalogo perdendo o Buy Box.`);
@@ -1052,6 +1078,26 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
     },
   },
 
+  // ---------------------------------------------------------------- Bot de perguntas (v1.6)
+  {
+    sistema: 'bot',
+    definicao: {
+      name: 'bot_perguntas_estado',
+      description:
+        'BOT DE PERGUNTAS do Mercado Livre (mcs-bot, que substitui o Gobots): perguntas por situacao (pendentes, respondidas, ' +
+        'arquivadas), pendentes recentes, tempo medio de resposta em 30 dias, se o envio pelo bot esta ligado, se o ML esta ' +
+        'conectado, quantas respostas prontas e correcoes ele tem, e as perguntas pendentes com o assunto e se ja ha sugestao do bot. ' +
+        'Use para "quantas perguntas estao esperando?", "o bot esta respondendo?", "quanto tempo levamos para responder?".',
+      input_schema: { type: 'object', properties: { limite: { type: 'integer', description: 'quantas pendentes listar (padrao 10, ate 50)' } } },
+    },
+    async executar(entrada) {
+      const r = await chamar('bot', '/api/estado');
+      const n = limitar(entrada?.limite, 10, 50);
+      const pendentes: any[] = Array.isArray(r?.pendentes) ? r.pendentes : [];
+      return { ...resumoDoBot(r), pendentes: pendentes.slice(0, n).map((x) => ({ ...x, pergunta: String(x.pergunta ?? '').slice(0, 200) })) };
+    },
+  },
+
   // ---------------------------------------------------------------- Backup do Tiny (v1.5)
   {
     sistema: 'backup',
@@ -1077,6 +1123,51 @@ export const FERRAMENTAS_LOCAIS: FerramentaLocal[] = [
         resumo24h: r?.ultimas24h?.resumo,
         fila: r?.fila,
         exclusoes: r?.exclusoes,
+      };
+    },
+  },
+  // ---------------------------------------------------------------- Saude do produto (v1.7)
+  {
+    sistema: 'geral',
+    definicao: {
+      name: 'saude_dos_produtos',
+      description:
+        'SAUDE DO PRODUTO num mes: junta por produto (SKU, ou anuncio MLB) as reclamacoes da Central de Ocorrencias (motivo do ML, ' +
+        'o que a equipe viu na devolucao, prejuizo), as perguntas que se repetem no anuncio (bot de perguntas) e a nota do anuncio ' +
+        '(ml-analytics). Devolve tres listas de acao: cobrar o fornecedor (defeito, quebra, peca faltando), corrigir o anuncio ' +
+        '(perguntas repetidas sobre medida/compatibilidade/kit, "diferente do anunciado") e nota baixa, mais o link da pagina completa. ' +
+        'Use para "como esta o produto X?", "o que cobrar do fornecedor?", "quais anuncios corrigir?", "relatorio de saude do mes". ' +
+        'Com "busca" (parte do titulo, SKU ou MLB) traz o detalhe so daquele produto.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          mes: { type: 'string', description: 'AAAA-MM. Padrao: o ultimo mes fechado.' },
+          busca: { type: 'string', description: 'parte do titulo, SKU ou MLB para ver um produto so' },
+          limite: { type: 'integer', description: 'itens por lista (1 a 15, padrao 5)' },
+        },
+      },
+    },
+    async executar(entrada) {
+      const m = await import('../saudeProduto');
+      const mes = typeof entrada?.mes === 'string' && /^\d{4}-\d{2}$/.test(entrada.mes) ? entrada.mes : m.ultimoMesFechado();
+      const r = await m.relatorioDoMes(mes);
+      const link = m.linkDoRelatorio(mes);
+      const busca = typeof entrada?.busca === 'string' ? entrada.busca.trim().toLowerCase() : '';
+      if (busca) {
+        const achados = r.produtos.filter((p) => p.titulo.toLowerCase().includes(busca) || (p.sku ?? '').toLowerCase().includes(busca) || p.anuncios.some((a) => a.toLowerCase().includes(busca)));
+        return { mes: r.periodo.nome, encontrados: achados.length, produtos: achados.slice(0, 5), faltou: r.faltou, link,
+          observacao: achados.length ? undefined : 'Nenhum produto com reclamacao, pergunta ou nota baixa no mes bate com a busca (pode estar saudavel).' };
+      }
+      const n = limitar(entrada?.limite, 5, 15);
+      return {
+        mes: r.periodo.nome,
+        totais: r.totais,
+        cobrarFornecedor: r.cobrarFornecedor.slice(0, n).map((p) => m.linhaFornecedor(p)),
+        corrigirAnuncio: r.corrigirAnuncio.slice(0, n).map((p) => m.linhaAnuncio(p)),
+        notaBaixa: r.notaBaixa.slice(0, n).map((p) => m.linhaNota(p)),
+        quantos: { cobrarFornecedor: r.cobrarFornecedor.length, corrigirAnuncio: r.corrigirAnuncio.length, notaBaixa: r.notaBaixa.length },
+        faltou: r.faltou,
+        link,
       };
     },
   },
@@ -1136,7 +1227,11 @@ export async function catalogo(forcar = false): Promise<CatalogoDeFerramentas> {
   if (semBackup) {
     avisos.push('O Backup do Tiny nao esta ligado ao Gerente (falta BACKUP_BASE_URL). Perguntas sobre o backup nao podem ser respondidas por aqui.');
   }
-  const locais = FERRAMENTAS_LOCAIS.filter((f) => !(semOcorrencias && f.sistema === 'ocorrencias') && !(semBackup && f.sistema === 'backup'));
+  const semBot = !sistemas().bot.baseUrl;
+  if (semBot) {
+    avisos.push('O bot de perguntas nao esta ligado ao Gerente (falta BOT_BASE_URL). A contagem de perguntas vem do ml-analytics.');
+  }
+  const locais = FERRAMENTAS_LOCAIS.filter((f) => !(semOcorrencias && f.sistema === 'ocorrencias') && !(semBackup && f.sistema === 'backup') && !(semBot && f.sistema === 'bot'));
   const porSistema: Record<string, string[]> = { analytics: doAnalytics.map((f) => f.name) };
   for (const f of locais) (porSistema[f.sistema] ??= []).push(f.definicao.name);
   return {

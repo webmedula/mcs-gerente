@@ -84,5 +84,14 @@ describe('limitarResultado', () => {
     }
     expect(requisicaoPermitida('backup', 'POST', '/painel/api/estado')).toBe(false);
   });
+
+  it('Bot de perguntas: so o estado e a saude; o painel de aprovar e enviar nem sai do Gerente', () => {
+    expect(requisicaoPermitida('bot', 'GET', '/api/estado')).toBe(true);
+    expect(requisicaoPermitida('bot', 'GET', '/health')).toBe(true);
+    for (const c of ['/api/perguntas', '/api/painel/estado', '/painel', '/api/estado/../perguntas']) {
+      expect(requisicaoPermitida('bot', 'GET', c)).toBe(false);
+    }
+    expect(requisicaoPermitida('bot', 'POST', '/api/estado')).toBe(false);
+  });
 });
 

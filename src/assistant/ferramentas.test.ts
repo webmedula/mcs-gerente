@@ -13,6 +13,8 @@ process.env.OCORRENCIAS_BASE_URL = 'http://oc.test';
 process.env.OCORRENCIAS_API_KEY = 'mcsia_teste';
 process.env.BACKUP_BASE_URL = 'http://backup.test';
 process.env.BACKUP_API_KEY = 'chave-backup';
+process.env.BOT_BASE_URL = 'http://bot.test';
+process.env.BOT_API_KEY = 'chave-bot';
 
 const { FERRAMENTAS_LOCAIS, catalogo, executarFerramenta, _limparCacheAnalytics } = await import('./ferramentas');
 

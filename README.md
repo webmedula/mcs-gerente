@@ -1,5 +1,24 @@
-# mcs-gerente — v1.5.3 (2026-11-10)
+# mcs-gerente — v1.7.0 (2026-11-15)
 
+> **v1.7.0:** **saúde do produto.** Todo mês (dia `RELATORIO_SAUDE_DIA`, padrão 1, às `RELATORIO_SAUDE_HORA`, padrão 9h de
+> Brasília; `-1` desliga) o Gerente junta por produto (SKU, ou o anúncio MLB) as reclamações da Central de Ocorrências
+> (v1.14.0+, `GET /api/admin/saude-produtos`), as perguntas que se repetem no anúncio (mcs-bot 0.12.0+, `GET /api/saude-produtos`)
+> e a nota do anúncio (ml-analytics `/api/ratings`; SKU e unidades por anúncio de `/api/margem`) e manda no Telegram três
+> listas: **cobrar o fornecedor** (defeito, quebra, peça faltando; a partir de `SAUDE_MIN_RECLAMACOES`, padrão 2),
+> **corrigir o anúncio** (a mesma pergunta sobre medida/compatibilidade/kit/instalação/original `SAUDE_MIN_PERGUNTAS_REPETIDAS`
+> vezes, padrão 3, ou reclamação de "diferente do anunciado") e **nota baixa**. Vem com um link assinado para a página completa
+> (`/relatorio/saude/AAAA-MM?t=...`, abre só aquele mês). Sem IA, sem custo de token. A ferramenta `saude_dos_produtos`
+> responde "como está o produto X?" e "o que cobrar do fornecedor?".
+> Teste: `GET /debug/saude-produtos?key=...&mes=2026-10` mostra o texto e o JSON; `&enviar=1` manda agora.
+>
+
+> **v1.6.0:** **bot de perguntas** vira o sexto sistema (`BOT_BASE_URL` = `https://bot.mcs.ind.br` + `BOT_API_KEY` = a
+> `BOT_API_KEY` do mcs-bot). Ferramenta `bot_perguntas_estado` (perguntas por situação, pendentes recentes, tempo de
+> resposta em 30 dias, envio ligado ou não, respostas prontas, correções e as pendentes com sugestão), o bot entra no
+> `estado_dos_sistemas` e no panorama, e o vigia avisa quando cai o login do Mercado Livre no bot. Só `GET /api/estado`
+> e `/health` passam pela trava; o painel do bot (aprovar e enviar) continua só por senha de pessoa. A planilha de
+> compras do ml-analytics v51 (`planejamento_de_compras`) chega sozinha, como toda ferramenta do analytics.
+>
 > **v1.5.3:** o vigia distingue **"sem acesso" (403)** de "fora do ar": quando a Central (ou outro sistema) responde
 > 403 é porque a versão no ar ainda não libera a consulta para o Gerente; o aviso pede o deploy, sai uma vez e não
 > se repete a cada rodada.

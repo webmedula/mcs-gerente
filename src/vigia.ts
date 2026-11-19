@@ -41,7 +41,14 @@ export const ALVOS: Alvo[] = [
   { id: 'actions.ml', rotulo: 'Mercado Livre no ml-actions', sistema: 'actions', caminho: '/api/oauth/ml/status', campo: 'authenticated' },
   { id: 'ocorrencias.ml', rotulo: 'Mercado Livre na Central de Ocorrencias', sistema: 'ocorrencias', caminho: '/api/admin/ml/status', campo: 'conectado', ignorarSe: 'configurado' },
   { id: 'backup.saude', rotulo: 'Backup do Tiny', sistema: 'backup', caminho: '/painel/api/estado', campo: 'ok', tipo: 'saude' },
+  // v1.6: o login do ML no bot de perguntas fica em mercadoLivre.conectado (campo com ponto = caminho aninhado).
+  { id: 'bot.ml', rotulo: 'Mercado Livre no bot de perguntas', sistema: 'bot', caminho: '/api/estado', campo: 'mercadoLivre.conectado', ignorarSe: 'mercadoLivre.appConfigurado' },
 ];
+
+/** Le um campo, aceitando caminho com ponto (ex.: 'mercadoLivre.conectado'). */
+export function lerCampo(r: any, campo: string): unknown {
+  return campo.split('.').reduce((o: any, k) => (o == null ? undefined : o[k]), r);
+}
 
 export interface Leitura {
   id: string;
@@ -59,8 +66,8 @@ export async function verificar(): Promise<Leitura[]> {
     ativos.map(async (a): Promise<Leitura | null> => {
       try {
         const r = await chamar(a.sistema, a.caminho, { timeoutMs: 15000 });
-        if (a.ignorarSe && r?.[a.ignorarSe] === false) return null;
-        const ok = r?.[a.campo] === true;
+        if (a.ignorarSe && lerCampo(r, a.ignorarSe) === false) return null;
+        const ok = lerCampo(r, a.campo) === true;
         const detalhe = !ok && a.tipo === 'saude' && Array.isArray(r?.alertas) ? r.alertas.join(' ') : undefined;
         return { id: a.id, rotulo: a.rotulo, estado: ok ? 'ok' : 'caido', detalhe, tipo: a.tipo };
       } catch (err: any) {

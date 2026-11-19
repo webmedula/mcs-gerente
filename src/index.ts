@@ -4,6 +4,7 @@ import { buildServer } from './server';
 import { sistemas } from './sistemas';
 import { startAvisoPromocoes } from './avisoPromocoes';
 import { startVigia } from './vigia';
+import { startRelatorioSaude } from './saudeProduto';
 
 async function main(): Promise<void> {
   const app = buildServer();
@@ -17,6 +18,7 @@ async function main(): Promise<void> {
   }
   startAvisoPromocoes();
   startVigia();
+  startRelatorioSaude();
   if (!config.serviceApiKey) logger.warn('[SEGURANCA] SERVICE_API_KEY vazia: rotas /debug/* ficam desligadas.');
 }
 
