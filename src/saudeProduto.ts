@@ -73,8 +73,41 @@ const TERMOS_ANUNCIO = ['diferente do anunciado', 'diferente do anuncio', 'nao e
 const TERMOS_QUALIDADE = ['defeito', 'defeituoso', 'danificado', 'quebrad', 'trincad', 'avariad', 'nao funciona', 'parou de funcionar', 'nao liga', 'incompleto', 'falta', 'faltando', 'faltam', 'vazamento', 'queimad'];
 const TERMOS_ENTREGA = ['nao recebi', 'nao chegou', 'atraso', 'atrasad', 'extravi', 'produto errado', 'enviaram outro', 'veio outro'];
 
-/** Em que lista uma reclamacao entra. Pura. O motivo do ML e a conferencia da equipe valem mais que o tipo. */
+/**
+ * Codigos de motivo que o Mercado Livre manda nas reclamacoes e devolucoes (vistos no primeiro relatorio real,
+ * outubro de 2026). Valem mais que o tipo da ocorrencia: a Central marca como "defeito" muita devolucao que no ML
+ * e arrependimento. Codigo desconhecido cai nas palavras-chave abaixo.
+ */
+export const MOTIVOS_ML: Record<string, { nome: string; categoria: Categoria }> = {
+  repentant_buyer: { nome: 'Comprador se arrependeu', categoria: 'outros' },
+  not_working_item: { nome: 'Não funciona', categoria: 'qualidade' },
+  broken_item: { nome: 'Chegou quebrado', categoria: 'qualidade' },
+  damaged_package_broken_item: { nome: 'Embalagem danificada, produto quebrado', categoria: 'qualidade' },
+  damaged_package_not_working_item: { nome: 'Embalagem danificada, não funciona', categoria: 'qualidade' },
+  damaged_package_missing_item: { nome: 'Embalagem danificada, faltando item', categoria: 'qualidade' },
+  missing_accessories: { nome: 'Faltando acessórios', categoria: 'qualidade' },
+  missing_item: { nome: 'Faltando item', categoria: 'qualidade' },
+  missing_parts: { nome: 'Faltando peças', categoria: 'qualidade' },
+  defective_item: { nome: 'Com defeito', categoria: 'qualidade' },
+  different_than_published: { nome: 'Diferente do anunciado', categoria: 'anuncio' },
+  uncompats_item_with_vehicle: { nome: 'Não serve no veículo', categoria: 'anuncio' },
+  uncompats_item_with_vehicle_acc: { nome: 'Não serve no veículo', categoria: 'anuncio' },
+  different_color_or_size: { nome: 'Cor ou tamanho diferente', categoria: 'anuncio' },
+  different_color_or_size_acc: { nome: 'Cor ou tamanho diferente', categoria: 'anuncio' },
+  different_item_other: { nome: 'Veio outro produto', categoria: 'entrega' },
+  different_item: { nome: 'Veio outro produto', categoria: 'entrega' },
+  not_received: { nome: 'Não recebeu', categoria: 'entrega' },
+};
+
+/** Nome em portugues de um motivo do ML (o codigo cru quando nao conhecemos). */
+export function nomeDoMotivo(motivo: string): string {
+  return MOTIVOS_ML[motivo.trim().toLowerCase()]?.nome ?? motivo;
+}
+
+/** Em que lista uma reclamacao entra. Pura. O codigo do ML vale mais; depois a conferencia, as palavras e o tipo. */
 export function categoriaDaReclamacao(o: { tipo?: string | null; motivoMl?: string | null; conferencia?: string | null; motivoReal?: string | null }): Categoria {
+  const codigo = MOTIVOS_ML[String(o.motivoMl ?? '').trim().toLowerCase()];
+  if (codigo) return codigo.categoria;
   const texto = normalizar(`${o.motivoMl ?? ''} | ${o.motivoReal ?? ''}`);
   if (o.tipo === 'diferente_anuncio' || TERMOS_ANUNCIO.some((t) => texto.includes(t))) return 'anuncio';
   if (o.tipo === 'defeito' || o.conferencia === 'danificado' || o.conferencia === 'incompleto' || TERMOS_QUALIDADE.some((t) => texto.includes(t))) return 'qualidade';
@@ -134,6 +167,8 @@ export interface RelatorioSaude {
   notaBaixa: ProdutoSaude[];
   /** Fonte que nao respondeu: o relatorio sai assim mesmo, dizendo o que faltou. */
   faltou: string[];
+  /** v1.7.1: os limites usados (para conferir pelo /debug se a variavel de ambiente foi lida). */
+  criterios: { minReclamacoes: number; minRepetidas: number };
 }
 
 const falhou = (r: unknown): boolean => !r || (typeof r === 'object' && 'erro' in (r as any));
@@ -153,6 +188,8 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
   if (falhou(f.reclamacoes)) faltou.push(`Reclamações (Central de Ocorrências): ${f.reclamacoes?.erro ?? 'sem resposta'}`);
   if (falhou(f.perguntas)) faltou.push(`Perguntas (bot de perguntas): ${f.perguntas?.erro ?? 'sem resposta'}`);
   if (falhou(f.notas)) faltou.push(`Nota dos anúncios (ml-analytics): ${f.notas?.erro ?? 'sem resposta'}`);
+  // v1.7.1: sem a margem, o relatório não sabe o SKU de cada anúncio (o mesmo produto aparece uma vez por anúncio) nem as vendas.
+  if (falhou(f.margem)) faltou.push(`SKU e vendas por anúncio (margem do ml-analytics): ${f.margem?.erro ?? 'sem resposta'}. Sem isso, cada anúncio aparece separado.`);
 
   const ocorrencias: any[] = !falhou(f.reclamacoes) && Array.isArray(f.reclamacoes?.ocorrencias) ? f.reclamacoes.ocorrencias : [];
   const anteriores: any[] = !falhou(f.reclamacoesMesAnterior) && Array.isArray(f.reclamacoesMesAnterior?.ocorrencias) ? f.reclamacoesMesAnterior.ocorrencias : [];
@@ -185,7 +222,10 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
     const s = skuNorm(sku) ?? (mlbNorm(itemId) ? skuDoAnuncio.get(mlbNorm(itemId)!) ?? null : null);
     if (s) return `SKU:${s}`;
     const mlb = mlbNorm(itemId);
-    return mlb ? `MLB:${mlb}` : null;
+    if (!mlb) return null;
+    // v1.7.1: sem SKU, anuncios com o MESMO titulo contam como um produto (clones da recriacao, por exemplo).
+    const titulo = titulos.get(mlb);
+    return titulo ? `TITULO:${normalizar(titulo).replace(/\s+/g, ' ').trim()}` : `MLB:${mlb}`;
   };
 
   const produtos = new Map<string, ProdutoSaude & { _cats: Categoria[]; _motivos: string[]; _conf: string[] }>();
@@ -227,7 +267,7 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
       const cat = categoriaDaReclamacao(o);
       p.reclamacoes.total++;
       p._cats.push(cat);
-      if (o.motivoMl) p._motivos.push(String(o.motivoMl));
+      if (o.motivoMl) p._motivos.push(nomeDoMotivo(String(o.motivoMl)));
       else if (o.tipoNome) p._motivos.push(String(o.tipoNome));
       if (o.conferenciaNome) p._conf.push(String(o.conferenciaNome));
       const obs = [o.motivoReal, o.conferenciaObs].filter((x) => typeof x === 'string' && x.trim()).join(' · ');
@@ -322,6 +362,7 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
     corrigirAnuncio: lista.filter((p) => p.acoes.corrigirAnuncio),
     notaBaixa: lista.filter((p) => p.acoes.notaBaixa).sort((a, b) => (a.nota?.valor ?? 5) - (b.nota?.valor ?? 5)),
     faltou,
+    criterios: { minReclamacoes: opcoes.minReclamacoes, minRepetidas: opcoes.minRepetidas },
   };
 }
 

@@ -91,10 +91,12 @@ describe('saúde do produto', () => {
   });
 
   it('fonte fora do ar não derruba o relatório: diz o que faltou', () => {
-    const f = { ...fontes(), perguntas: { erro: 'Bot fora do ar' }, notas: { erro: 'ML não autorizado' } };
+    const f = { ...fontes(), perguntas: { erro: 'Bot fora do ar' }, notas: { erro: 'ML não autorizado' }, margem: { erro: 'demorou' } };
+    // sem a margem, o anúncio MLB9 (sem SKU na reclamação) não se junta ao FAROL-01: cada um fica com 1 reclamação
     const r = montarRelatorio(f, OUT, opcoes);
-    expect(r.faltou).toHaveLength(2);
-    expect(r.cobrarFornecedor).toHaveLength(1);
+    expect(r.faltou).toHaveLength(3);
+    expect(r.faltou[2]).toContain('cada anúncio aparece separado');
+    expect(r.cobrarFornecedor).toHaveLength(0);
     expect(relatorioEmTexto(r)).toContain('Faltou');
   });
 
@@ -127,6 +129,25 @@ describe('saúde do produto', () => {
   it('link assinado abre só aquele mês', () => {
     expect(assinaturaDoMes('2026-10', 'k')).toHaveLength(24);
     expect(assinaturaDoMes('2026-10', 'k')).not.toBe(assinaturaDoMes('2026-09', 'k'));
+  });
+
+  it('códigos de motivo do ML valem mais que o tipo e saem em português', () => {
+    expect(categoriaDaReclamacao({ tipo: 'defeito', motivoMl: 'repentant_buyer' })).toBe('outros');
+    expect(categoriaDaReclamacao({ tipo: 'troca_devolucao', motivoMl: 'not_working_item' })).toBe('qualidade');
+    expect(categoriaDaReclamacao({ tipo: 'defeito', motivoMl: 'uncompats_item_with_vehicle_acc' })).toBe('anuncio');
+    expect(categoriaDaReclamacao({ tipo: 'defeito', motivoMl: 'different_item_other' })).toBe('entrega');
+    const oc = (m: string, i: number) => rec({ protocolo: `Q${i}`, tipo: 'defeito', motivoMl: m, produtos: [{ itemId: 'MLB70', sku: 'COL-1', titulo: 'Coleira' }] });
+    const f = { ...fontes(), reclamacoes: { ocorrencias: [oc('repentant_buyer', 1), oc('repentant_buyer', 2), oc('repentant_buyer', 3), oc('broken_item', 4)] } };
+    const coleira = montarRelatorio(f, OUT, opcoes).produtos.find((p) => p.sku === 'COL-1')!;
+    expect(coleira.acoes.cobrarFornecedor).toBe(false); // 3 arrependimentos + 1 quebra: não cobra
+    expect(coleira.reclamacoes.motivos[0]).toEqual({ motivo: 'Comprador se arrependeu', vezes: 3 });
+  });
+
+  it('sem SKU, anúncios com o mesmo título viram um produto só', () => {
+    const f = { ...fontes(), notas: { limite: 4, minOpinioes: 1, items: ['MLB81', 'MLB82', 'MLB83'].map((id) => ({ itemId: id, title: 'Farol Led 7 Polegadas', nota: 2.3, totalAvaliacoes: 3 })) } };
+    const r = montarRelatorio(f, OUT, opcoes);
+    expect(r.notaBaixa).toHaveLength(1);
+    expect(r.notaBaixa[0].anuncios).toEqual(['MLB81', 'MLB82', 'MLB83']);
   });
 
   it('trava de leitura libera só as rotas novas de leitura', () => {
