@@ -169,6 +169,17 @@ describe('saúde do produto', () => {
     expect(r.cobrarFornecedor.map((p) => p.sku)).toEqual(['FAROL-01']);
   });
 
+  it('v1.7.3: anúncio sem opinião (nota 0) não esconde a nota ruim de outro anúncio do mesmo produto', () => {
+    const f = { ...fontes(), notas: { limite: 4, minOpinioes: 3, items: [
+      { itemId: 'MLB81', title: 'Farol Led 7 Polegadas', nota: 2.3, totalAvaliacoes: 3 },
+      { itemId: 'MLB82', title: 'Farol Led 7 Polegadas', nota: 0, totalAvaliacoes: 0 },
+      { itemId: 'MLB83', title: 'Farol Led 7 Polegadas', nota: 1, totalAvaliacoes: 1 },
+    ] } };
+    const r = montarRelatorio(f, OUT, opcoes);
+    expect(r.notaBaixa).toHaveLength(1);
+    expect(r.notaBaixa[0].nota).toMatchObject({ valor: 2.3, anuncio: 'MLB81', abaixoDoLimite: true });
+  });
+
   it('sem SKU, anúncios com o mesmo título viram um produto só', () => {
     const f = { ...fontes(), notas: { limite: 4, minOpinioes: 1, items: ['MLB81', 'MLB82', 'MLB83'].map((id) => ({ itemId: id, title: 'Farol Led 7 Polegadas', nota: 2.3, totalAvaliacoes: 3 })) } };
     const r = montarRelatorio(f, OUT, opcoes);

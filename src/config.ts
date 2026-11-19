@@ -9,7 +9,7 @@ const numero = (v: string | undefined, padrao: number): number => {
 
 export const config = {
   /** Versao — atualize a cada release. Exibida em /health e no /start do bot. */
-  appVersion: 'gerente v1.7.2 (2026-11-19)',
+  appVersion: 'gerente v1.7.3 (2026-11-19)',
 
   port: Number(process.env.PORT || 3020),
   /** Protege /debug/* deste servico (aceita x-api-key ou ?key=). */
