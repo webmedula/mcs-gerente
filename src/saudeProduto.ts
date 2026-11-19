@@ -126,6 +126,8 @@ export interface Fontes {
   perguntas: any; // GET /api/saude-produtos do mcs-bot (ou { erro })
   notas: any; // GET /api/ratings do ml-analytics (ou { erro })
   margem: any; // GET /api/margem do ml-analytics: SKU e unidades por anuncio (ou { erro })
+  /** v1.7.2: GET /api/skus do ml-analytics v53+: so SKU e titulo por anuncio, sem depender de vendas e custo. */
+  skus?: any;
 }
 
 export interface ProdutoSaude {
@@ -139,6 +141,10 @@ export interface ProdutoSaude {
     mesAnterior: number;
     porCategoria: Record<Categoria, number>;
     motivos: Array<{ motivo: string; vezes: number }>;
+    /** v1.7.2: motivos separados por categoria (a linha do fornecedor mostra só os de defeito). */
+    motivosPorCategoria: Record<Categoria, Array<{ motivo: string; vezes: number }>>;
+    /** v1.7.2: prejuízo só das reclamações de defeito, quebra ou peça faltando (é o que se cobra do fornecedor). */
+    prejuizoDefeito: number;
     conferencias: Array<{ conferencia: string; vezes: number }>;
     observacoes: string[];
     prejuizo: number;
@@ -189,7 +195,10 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
   if (falhou(f.perguntas)) faltou.push(`Perguntas (bot de perguntas): ${f.perguntas?.erro ?? 'sem resposta'}`);
   if (falhou(f.notas)) faltou.push(`Nota dos anúncios (ml-analytics): ${f.notas?.erro ?? 'sem resposta'}`);
   // v1.7.1: sem a margem, o relatório não sabe o SKU de cada anúncio (o mesmo produto aparece uma vez por anúncio) nem as vendas.
-  if (falhou(f.margem)) faltou.push(`SKU e vendas por anúncio (margem do ml-analytics): ${f.margem?.erro ?? 'sem resposta'}. Sem isso, cada anúncio aparece separado.`);
+  // v1.7.2: o SKU vem de /api/skus (leve); a margem fica só para as vendas. Sem os dois, cada anúncio aparece separado.
+  const temSkus = f.skus !== undefined && !falhou(f.skus);
+  if (falhou(f.margem) && !temSkus) faltou.push(`SKU e vendas por anúncio (ml-analytics): ${f.skus?.erro ?? f.margem?.erro ?? 'sem resposta'}. Sem isso, cada anúncio aparece separado.`);
+  else if (falhou(f.margem)) faltou.push(`Vendas por anúncio (margem do ml-analytics): ${f.margem?.erro ?? 'sem resposta'}. Só deixa de mostrar o % sobre os vendidos.`);
 
   const ocorrencias: any[] = !falhou(f.reclamacoes) && Array.isArray(f.reclamacoes?.ocorrencias) ? f.reclamacoes.ocorrencias : [];
   const anteriores: any[] = !falhou(f.reclamacoesMesAnterior) && Array.isArray(f.reclamacoesMesAnterior?.ocorrencias) ? f.reclamacoesMesAnterior.ocorrencias : [];
@@ -209,6 +218,8 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
     if (mlb && s && !skuDoAnuncio.has(mlb)) skuDoAnuncio.set(mlb, s);
     if (mlb && typeof titulo === 'string' && titulo && !titulos.has(mlb)) titulos.set(mlb, titulo);
   };
+  const skusAnalytics: any[] = temSkus && Array.isArray(f.skus?.anuncios) ? f.skus.anuncios : [];
+  for (const a of skusAnalytics) anotar(a.itemId, a.sku, a.titulo);
   for (const a of margem) {
     anotar(a.itemId, a.sku, a.titulo);
     const mlb = mlbNorm(a.itemId);
@@ -228,7 +239,7 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
     return titulo ? `TITULO:${normalizar(titulo).replace(/\s+/g, ' ').trim()}` : `MLB:${mlb}`;
   };
 
-  const produtos = new Map<string, ProdutoSaude & { _cats: Categoria[]; _motivos: string[]; _conf: string[] }>();
+  const produtos = new Map<string, ProdutoSaude & { _cats: Categoria[]; _motivos: string[]; _motivosCat: Record<Categoria, string[]>; _conf: string[] }>();
   const produto = (chave: string, titulo?: unknown, itemId?: unknown) => {
     let p = produtos.get(chave);
     if (!p) {
@@ -238,13 +249,14 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
         titulo: '',
         anuncios: [],
         unidades30d: null,
-        reclamacoes: { total: 0, mesAnterior: 0, porCategoria: { qualidade: 0, anuncio: 0, entrega: 0, outros: 0 }, motivos: [], conferencias: [], observacoes: [], prejuizo: 0, reputacaoAfetada: 0, protocolos: [] },
+        reclamacoes: { total: 0, mesAnterior: 0, porCategoria: { qualidade: 0, anuncio: 0, entrega: 0, outros: 0 }, motivos: [], motivosPorCategoria: { qualidade: [], anuncio: [], entrega: [], outros: [] }, prejuizoDefeito: 0, conferencias: [], observacoes: [], prejuizo: 0, reputacaoAfetada: 0, protocolos: [] },
         perguntas: { total: 0, sobreOProduto: 0, porAssunto: [], repetidas: [] },
         nota: null,
         acoes: { cobrarFornecedor: false, corrigirAnuncio: false, notaBaixa: false },
         peso: 0,
         _cats: [],
         _motivos: [],
+        _motivosCat: { qualidade: [], anuncio: [], entrega: [], outros: [] },
         _conf: [],
       };
       produtos.set(chave, p);
@@ -267,12 +279,18 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
       const cat = categoriaDaReclamacao(o);
       p.reclamacoes.total++;
       p._cats.push(cat);
-      if (o.motivoMl) p._motivos.push(nomeDoMotivo(String(o.motivoMl)));
-      else if (o.tipoNome) p._motivos.push(String(o.tipoNome));
+      const motivo = o.motivoMl ? nomeDoMotivo(String(o.motivoMl)) : o.tipoNome ? String(o.tipoNome) : null;
+      if (motivo) {
+        p._motivos.push(motivo);
+        p._motivosCat[cat].push(motivo);
+      }
       if (o.conferenciaNome) p._conf.push(String(o.conferenciaNome));
       const obs = [o.motivoReal, o.conferenciaObs].filter((x) => typeof x === 'string' && x.trim()).join(' · ');
       if (obs && p.reclamacoes.observacoes.length < 5) p.reclamacoes.observacoes.push(obs.slice(0, 160));
-      if (typeof o.custo === 'number' && o.custo > 0) p.reclamacoes.prejuizo = r2(p.reclamacoes.prejuizo + o.custo);
+      if (typeof o.custo === 'number' && o.custo > 0) {
+        p.reclamacoes.prejuizo = r2(p.reclamacoes.prejuizo + o.custo);
+        if (cat === 'qualidade') p.reclamacoes.prejuizoDefeito = r2(p.reclamacoes.prejuizoDefeito + o.custo);
+      }
       if (o.reputacaoAfetada === true) p.reclamacoes.reputacaoAfetada++;
       if (o.protocolo) p.reclamacoes.protocolos.push(String(o.protocolo));
     }
@@ -323,6 +341,9 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
     for (const c of p._cats) p.reclamacoes.porCategoria[c]++;
     p.reclamacoes.mesAnterior = anteriorPorChave.get(p.chave) ?? 0;
     p.reclamacoes.motivos = topContagem(p._motivos, 4).map(([motivo, vezes]) => ({ motivo, vezes }));
+    for (const c of Object.keys(p._motivosCat) as Categoria[]) {
+      p.reclamacoes.motivosPorCategoria[c] = topContagem(p._motivosCat[c], 4).map(([motivo, vezes]) => ({ motivo, vezes }));
+    }
     p.reclamacoes.conferencias = topContagem(p._conf, 4).map(([conferencia, vezes]) => ({ conferencia, vezes }));
     p.perguntas.porAssunto.sort((a, b) => b.quantidade - a.quantidade);
     p.perguntas.repetidas.sort((a, b) => Number(b.sobreOProduto) - Number(a.sobreOProduto) || b.quantidade - a.quantidade);
@@ -336,12 +357,13 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
     const repetidaSobreProduto = p.perguntas.repetidas.some((g) => g.sobreOProduto && g.quantidade >= opcoes.minRepetidas);
     p.acoes = {
       cobrarFornecedor: qualidade >= opcoes.minReclamacoes,
-      corrigirAnuncio: doAnuncio >= 1 || repetidaSobreProduto,
+      // v1.7.2: uma reclamação só de "diferente do anunciado" é ruído; pede o mesmo mínimo do fornecedor.
+      corrigirAnuncio: doAnuncio >= opcoes.minReclamacoes || repetidaSobreProduto,
       notaBaixa: !!p.nota?.abaixoDoLimite,
     };
     const somaRepetidas = p.perguntas.repetidas.filter((g) => g.sobreOProduto).reduce((s, g) => s + g.quantidade, 0);
     p.peso = qualidade * 3 + doAnuncio * 3 + p.reclamacoes.porCategoria.entrega + p.reclamacoes.porCategoria.outros + (p.acoes.notaBaixa ? 4 : 0) + somaRepetidas / 2 + p.reclamacoes.reputacaoAfetada;
-    const { _cats, _motivos, _conf, ...limpo } = p;
+    const { _cats, _motivos, _motivosCat, _conf, ...limpo } = p;
     lista.push(limpo);
   }
   lista.sort((a, b) => b.peso - a.peso || b.reclamacoes.total - a.reclamacoes.total);
@@ -358,12 +380,23 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
       limiteDaNota: limite,
     },
     produtos: lista,
-    cobrarFornecedor: lista.filter((p) => p.acoes.cobrarFornecedor),
-    corrigirAnuncio: lista.filter((p) => p.acoes.corrigirAnuncio),
+    // v1.7.2: cada lista na ordem do que ela trata (antes vinha pelo peso geral, que contava arrependimento).
+    cobrarFornecedor: lista
+      .filter((p) => p.acoes.cobrarFornecedor)
+      .sort((a, b) => b.reclamacoes.porCategoria.qualidade - a.reclamacoes.porCategoria.qualidade || b.reclamacoes.prejuizoDefeito - a.reclamacoes.prejuizoDefeito),
+    corrigirAnuncio: lista
+      .filter((p) => p.acoes.corrigirAnuncio)
+      .sort((a, b) => pesoDoAnuncio(b, opcoes.minRepetidas) - pesoDoAnuncio(a, opcoes.minRepetidas)),
     notaBaixa: lista.filter((p) => p.acoes.notaBaixa).sort((a, b) => (a.nota?.valor ?? 5) - (b.nota?.valor ?? 5)),
     faltou,
     criterios: { minReclamacoes: opcoes.minReclamacoes, minRepetidas: opcoes.minRepetidas },
   };
+}
+
+/** Quanto o anúncio precisa de correção: reclamações de "diferente do anunciado" + perguntas repetidas sobre o produto. */
+function pesoDoAnuncio(p: ProdutoSaude, minRepetidas: number): number {
+  const repetidas = p.perguntas.repetidas.filter((g) => g.sobreOProduto && g.quantidade >= minRepetidas).reduce((s, g) => s + g.quantidade, 0);
+  return p.reclamacoes.porCategoria.anuncio * 2 + repetidas;
 }
 
 // ------------------------------------------------------------------ texto (Telegram)
@@ -380,9 +413,10 @@ function porVendas(p: ProdutoSaude, n: number): string {
 export function linhaFornecedor(p: ProdutoSaude): string {
   const q = p.reclamacoes.porCategoria.qualidade;
   const partes = [`${q} reclamação(ões) de ${NOME_CATEGORIA.qualidade}${porVendas(p, q)}`];
-  if (p.reclamacoes.motivos.length) partes.push(`motivos: ${p.reclamacoes.motivos.slice(0, 2).map((m) => `"${m.motivo}" (${m.vezes})`).join(', ')}`);
+  const motivos = p.reclamacoes.motivosPorCategoria.qualidade;
+  if (motivos.length) partes.push(`motivos: ${motivos.slice(0, 3).map((m) => `"${m.motivo}" (${m.vezes})`).join(', ')}`);
   if (p.reclamacoes.conferencias.length) partes.push(`na devolução: ${p.reclamacoes.conferencias.slice(0, 2).map((c) => `${c.conferencia.toLowerCase()} (${c.vezes})`).join(', ')}`);
-  if (p.reclamacoes.prejuizo > 0) partes.push(`prejuízo ${reais(p.reclamacoes.prejuizo)}`);
+  if (p.reclamacoes.prejuizoDefeito > 0) partes.push(`prejuízo com essas devoluções ${reais(p.reclamacoes.prejuizoDefeito)}`);
   return `${nomeCurto(p)}: ${partes.join('; ')}.`;
 }
 
@@ -392,7 +426,10 @@ export function linhaAnuncio(p: ProdutoSaude, minRepetidas = config.saudeMinPerg
     partes.push(`${g.quantidade} perguntas iguais sobre ${g.nome.toLowerCase()} ("${g.exemplo.slice(0, 70)}")`);
   }
   const d = p.reclamacoes.porCategoria.anuncio;
-  if (d) partes.push(`${d} reclamação(ões) de ${NOME_CATEGORIA.anuncio}`);
+  if (d) {
+    const m = p.reclamacoes.motivosPorCategoria.anuncio.slice(0, 2).map((x) => `"${x.motivo}" (${x.vezes})`).join(', ');
+    partes.push(`${d} reclamação(ões) de ${NOME_CATEGORIA.anuncio}${m ? ` (${m})` : ''}`);
+  }
   return `${nomeCurto(p)}: ${partes.join('; ')}.`;
 }
 
@@ -448,7 +485,7 @@ function cartao(p: ProdutoSaude): string {
       ${rc.motivos.length ? `<ul>${rc.motivos.map((m) => `<li>${esc(m.motivo)} <b>(${m.vezes})</b></li>`).join('')}</ul>` : ''}
       ${rc.conferencias.length ? `<p class="sub">Na devolução: ${rc.conferencias.map((c) => `${esc(c.conferencia.toLowerCase())} (${c.vezes})`).join(', ')}</p>` : ''}
       ${rc.observacoes.length ? `<p class="sub">Anotado pela equipe: ${rc.observacoes.map((o) => `“${esc(o)}”`).join(' ')}</p>` : ''}
-      ${rc.prejuizo > 0 ? `<p class="sub">Prejuízo: <b>${reais(rc.prejuizo)}</b></p>` : ''}
+      ${rc.prejuizo > 0 ? `<p class="sub">Prejuízo: <b>${reais(rc.prejuizo)}</b>${rc.prejuizoDefeito > 0 ? ` (com defeito, quebra ou peça faltando: ${reais(rc.prejuizoDefeito)})` : ''}</p>` : ''}
       ${rc.reputacaoAfetada ? `<p class="sub">${rc.reputacaoAfetada} afetaram a reputação</p>` : ''}
       ${rc.protocolos.length ? `<p class="sub">Protocolos: ${rc.protocolos.slice(0, 8).map(esc).join(', ')}</p>` : ''}
     </section>
@@ -516,14 +553,15 @@ export async function buscarFontes(periodo: Periodo): Promise<Fontes> {
   const antes = periodoDoMes(mesAntes(periodo.mes))!;
   const q = (p: Periodo) => `?desde=${p.desde}&ate=${p.ate}`;
   const naoLigado = (rotulo: string, variavel: string) => Promise.resolve({ erro: `${rotulo} não está ligado ao Gerente (falta ${variavel}).` });
-  const [reclamacoes, reclamacoesMesAnterior, perguntas, notas, margem] = await Promise.all([
+  const [reclamacoes, reclamacoesMesAnterior, perguntas, notas, margem, skus] = await Promise.all([
     s.ocorrencias.baseUrl ? tentar(() => chamar('ocorrencias', `/api/admin/saude-produtos${q(periodo)}`, { timeoutMs: 60000 })) : naoLigado('A Central de Ocorrências', 'OCORRENCIAS_BASE_URL'),
     s.ocorrencias.baseUrl ? tentar(() => chamar('ocorrencias', `/api/admin/saude-produtos${q(antes)}`, { timeoutMs: 60000 })) : naoLigado('A Central de Ocorrências', 'OCORRENCIAS_BASE_URL'),
     s.bot.baseUrl ? tentar(() => chamar('bot', `/api/saude-produtos${q(periodo)}`, { timeoutMs: 30000 })) : naoLigado('O bot de perguntas', 'BOT_BASE_URL'),
     tentar(() => chamar('analytics', '/api/ratings', { timeoutMs: 60000 })),
     tentar(() => chamar('analytics', '/api/margem', { timeoutMs: 90000 })),
+    tentar(() => chamar('analytics', '/api/skus', { timeoutMs: 90000 })),
   ]);
-  return { reclamacoes, reclamacoesMesAnterior, perguntas, notas, margem };
+  return { reclamacoes, reclamacoesMesAnterior, perguntas, notas, margem, skus };
 }
 
 /** Cache curto: o relatorio de um mes fechado nao muda a cada minuto, e cada geracao varre tres sistemas. */

@@ -1,4 +1,9 @@
-# mcs-gerente — v1.7.1 (2026-11-19)
+# mcs-gerente — v1.7.2 (2026-11-19)
+
+> **v1.7.2:** relatório de saúde mais limpo. "Cobrar o fornecedor" mostra só os motivos de defeito (sem "Comprador se
+> arrependeu") e o prejuízo dessas devoluções, em ordem de quem tem mais defeito. "Corrigir o anúncio" pede o mesmo mínimo
+> de reclamações (`SAUDE_MIN_RECLAMACOES`) de "diferente do anunciado" e vem em ordem. O SKU de cada anúncio passa a vir
+> de `GET /api/skus` do ml-analytics (v53+), que não depende das vendas nem do Tiny; a margem fica só para o % vendido.
 
 > **v1.7.1:** ajustes do primeiro relatório real (outubro). (1) Os **códigos de motivo do ML** (`repentant_buyer`,
 > `broken_item`, `different_than_published`...) agora decidem a lista e aparecem em português; antes, devolução por

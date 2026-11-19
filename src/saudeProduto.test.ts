@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  assinaturaDoMes, categoriaDaReclamacao, deveEnviarRelatorio, mesAntes, montarRelatorio, periodoDoMes, relatorioEmHtml, relatorioEmTexto, ultimoMesFechado,
+  linhaFornecedor, assinaturaDoMes, categoriaDaReclamacao, deveEnviarRelatorio, mesAntes, montarRelatorio, periodoDoMes, relatorioEmHtml, relatorioEmTexto, ultimoMesFechado,
 } from './saudeProduto';
 import { requisicaoPermitida } from './sistemas';
 
@@ -141,6 +141,32 @@ describe('saúde do produto', () => {
     const coleira = montarRelatorio(f, OUT, opcoes).produtos.find((p) => p.sku === 'COL-1')!;
     expect(coleira.acoes.cobrarFornecedor).toBe(false); // 3 arrependimentos + 1 quebra: não cobra
     expect(coleira.reclamacoes.motivos[0]).toEqual({ motivo: 'Comprador se arrependeu', vezes: 3 });
+  });
+
+  it('v1.7.2: fornecedor mostra só motivos de defeito, ordem pela quantidade de defeito, 1 "diferente do anunciado" não basta', () => {
+    const oc = (m: string, i: number, sku: string, custo = 10) => rec({ protocolo: `R${sku}${i}`, tipo: 'defeito', motivoMl: m, custo, produtos: [{ itemId: `MLB${sku.length}${i}`, sku, titulo: sku }] });
+    const ocorrencias = [
+      ...[1, 2, 3, 4, 5, 6].map((i) => oc('repentant_buyer', i, 'COL')),
+      oc('broken_item', 7, 'COL'), oc('not_working_item', 8, 'COL'),
+      ...[1, 2, 3, 4].map((i) => oc('not_working_item', i, 'FITA')),
+      oc('different_than_published', 1, 'SENSOR'),
+    ];
+    const r = montarRelatorio({ ...fontes(), reclamacoes: { ocorrencias } }, OUT, opcoes);
+    expect(r.cobrarFornecedor.map((p) => p.sku)).toEqual(['FITA', 'COL']);
+    const col = r.cobrarFornecedor[1];
+    expect(col.reclamacoes.motivosPorCategoria.qualidade.map((m) => m.motivo)).not.toContain('Comprador se arrependeu');
+    expect(col.reclamacoes.prejuizoDefeito).toBe(20);
+    expect(linhaFornecedor(col)).not.toContain('arrependeu');
+    expect(linhaFornecedor(col)).toMatch(/prejuízo com essas devoluções R\$\s20,00/);
+    expect(r.corrigirAnuncio.some((p) => p.sku === 'SENSOR')).toBe(false);
+  });
+
+  it('v1.7.2: margem fora do ar mas /api/skus responde: junta pelo SKU e só avisa das vendas', () => {
+    const f = { ...fontes(), margem: { erro: 'vendas dos ultimos dias no ML: Resource deprecated' }, skus: { anuncios: [{ itemId: 'MLB9', sku: 'FAROL-01', titulo: 'Farol de milha' }] } };
+    const r = montarRelatorio(f, OUT, opcoes);
+    expect(r.faltou).toHaveLength(1);
+    expect(r.faltou[0]).toContain('% sobre os vendidos');
+    expect(r.cobrarFornecedor.map((p) => p.sku)).toEqual(['FAROL-01']);
   });
 
   it('sem SKU, anúncios com o mesmo título viram um produto só', () => {
