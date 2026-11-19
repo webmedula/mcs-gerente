@@ -1,5 +1,7 @@
-# mcs-gerente — v1.7.2 (2026-11-19)
+# mcs-gerente — v1.7.3 (2026-11-19)
 
+> **v1.7.3:** anúncio sem opinião (nota 0) não esconde mais a nota ruim de outro anúncio do mesmo produto na lista "Nota baixa".
+>
 > **v1.7.2:** relatório de saúde mais limpo. "Cobrar o fornecedor" mostra só os motivos de defeito (sem "Comprador se
 > arrependeu") e o prejuízo dessas devoluções, em ordem de quem tem mais defeito. "Corrigir o anúncio" pede o mesmo mínimo
 > de reclamações (`SAUDE_MIN_RECLAMACOES`) de "diferente do anunciado" e vem em ordem. O SKU de cada anúncio passa a vir

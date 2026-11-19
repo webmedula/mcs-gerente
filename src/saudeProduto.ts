@@ -327,12 +327,14 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
   // 4. Nota: entra todo anuncio abaixo do limite e, para quem ja esta no relatorio, a pior nota dos anuncios dele.
   for (const n of notas) {
     const mlb = mlbNorm(n.itemId);
-    if (!mlb || typeof n.nota !== 'number') continue;
+    // v1.7.3: anúncio sem opinião vem com nota 0; não é nota ruim e não pode esconder a nota de outro anúncio do produto.
+    if (!mlb || typeof n.nota !== 'number' || n.nota <= 0 || n.totalAvaliacoes === 0) continue;
     const k = chaveDe(mlb, null)!;
     const abaixo = limite != null && n.nota < limite && (n.totalAvaliacoes == null || n.totalAvaliacoes >= minOpinioes);
     if (!abaixo && !produtos.has(k)) continue;
     const p = produto(k, n.title, mlb);
-    if (!p.nota || n.nota < p.nota.valor) p.nota = { valor: n.nota, opinioes: n.totalAvaliacoes ?? null, anuncio: mlb, abaixoDoLimite: abaixo };
+    // Fica a pior nota que conta (abaixo do limite com opiniões suficientes vence a que não conta).
+    if (!p.nota || (abaixo && !p.nota.abaixoDoLimite) || (abaixo === p.nota.abaixoDoLimite && n.nota < p.nota.valor)) p.nota = { valor: n.nota, opinioes: n.totalAvaliacoes ?? null, anuncio: mlb, abaixoDoLimite: abaixo };
   }
 
   // 5. Fecha cada produto: contagens, unidades, acoes e peso.
