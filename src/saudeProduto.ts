@@ -153,6 +153,8 @@ export function montarRelatorio(f: Fontes, periodo: Periodo, opcoes = { minRecla
   if (falhou(f.reclamacoes)) faltou.push(`Reclamações (Central de Ocorrências): ${f.reclamacoes?.erro ?? 'sem resposta'}`);
   if (falhou(f.perguntas)) faltou.push(`Perguntas (bot de perguntas): ${f.perguntas?.erro ?? 'sem resposta'}`);
   if (falhou(f.notas)) faltou.push(`Nota dos anúncios (ml-analytics): ${f.notas?.erro ?? 'sem resposta'}`);
+  // v1.7.1: sem a margem, o relatório não sabe o SKU de cada anúncio (o mesmo produto aparece uma vez por anúncio) nem as vendas.
+  if (falhou(f.margem)) faltou.push(`SKU e vendas por anúncio (margem do ml-analytics): ${f.margem?.erro ?? 'sem resposta'}. Sem isso, cada anúncio aparece separado.`);
 
   const ocorrencias: any[] = !falhou(f.reclamacoes) && Array.isArray(f.reclamacoes?.ocorrencias) ? f.reclamacoes.ocorrencias : [];
   const anteriores: any[] = !falhou(f.reclamacoesMesAnterior) && Array.isArray(f.reclamacoesMesAnterior?.ocorrencias) ? f.reclamacoesMesAnterior.ocorrencias : [];

@@ -91,10 +91,12 @@ describe('saúde do produto', () => {
   });
 
   it('fonte fora do ar não derruba o relatório: diz o que faltou', () => {
-    const f = { ...fontes(), perguntas: { erro: 'Bot fora do ar' }, notas: { erro: 'ML não autorizado' } };
+    const f = { ...fontes(), perguntas: { erro: 'Bot fora do ar' }, notas: { erro: 'ML não autorizado' }, margem: { erro: 'demorou' } };
+    // sem a margem, o anúncio MLB9 (sem SKU na reclamação) não se junta ao FAROL-01: cada um fica com 1 reclamação
     const r = montarRelatorio(f, OUT, opcoes);
-    expect(r.faltou).toHaveLength(2);
-    expect(r.cobrarFornecedor).toHaveLength(1);
+    expect(r.faltou).toHaveLength(3);
+    expect(r.faltou[2]).toContain('cada anúncio aparece separado');
+    expect(r.cobrarFornecedor).toHaveLength(0);
     expect(relatorioEmTexto(r)).toContain('Faltou');
   });
 

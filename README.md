@@ -1,5 +1,7 @@
-# mcs-gerente — v1.7.0 (2026-11-15)
+# mcs-gerente — v1.7.1 (2026-11-19)
 
+> **v1.7.1:** o relatório de saúde do produto avisa em "Faltou" quando a margem do ml-analytics (SKU e vendas por anúncio) não respondeu; antes o mesmo produto aparecia repetido, um por anúncio, sem explicação.
+>
 > **v1.7.0:** **saúde do produto.** Todo mês (dia `RELATORIO_SAUDE_DIA`, padrão 1, às `RELATORIO_SAUDE_HORA`, padrão 9h de
 > Brasília; `-1` desliga) o Gerente junta por produto (SKU, ou o anúncio MLB) as reclamações da Central de Ocorrências
 > (v1.14.0+, `GET /api/admin/saude-produtos`), as perguntas que se repetem no anúncio (mcs-bot 0.12.0+, `GET /api/saude-produtos`)
