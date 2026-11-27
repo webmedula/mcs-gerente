@@ -1,4 +1,10 @@
-# mcs-gerente — v1.7.3 (2026-11-19)
+# mcs-gerente — v1.8.0 (2026-11-27)
+
+> **v1.8.0:** **mercado do ML.** O Gerente passa a usar as ferramentas `mercado_*` do ml-analytics (v57+): mais vendidos por
+> categoria, buscas em alta, vendedores e preços de um produto de catálogo, busca de produto e radar. Toda semana
+> (`RADAR_MERCADO_DIA`, padrão 1 = segunda, às `RADAR_MERCADO_HORA`, padrão 9h de Brasília; `-1` desliga) manda no Telegram
+> o **radar de mercado**: nossos produtos na lista de mais vendidos (subiu, caiu, saiu), quem entrou, quem subiu forte e as
+> buscas em alta, comparando com a semana anterior. Sem IA. Teste: `GET /debug/radar-mercado?key=...` (`&enviar=1` manda agora).
 
 > **v1.7.3:** anúncio sem opinião (nota 0) não esconde mais a nota ruim de outro anúncio do mesmo produto na lista "Nota baixa".
 >

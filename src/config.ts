@@ -9,7 +9,7 @@ const numero = (v: string | undefined, padrao: number): number => {
 
 export const config = {
   /** Versao — atualize a cada release. Exibida em /health e no /start do bot. */
-  appVersion: 'gerente v1.7.3 (2026-11-19)',
+  appVersion: 'gerente v1.8.0 (2026-11-27)',
 
   port: Number(process.env.PORT || 3020),
   /** Protege /debug/* deste servico (aceita x-api-key ou ?key=). */
@@ -96,6 +96,9 @@ export const config = {
   telegramChatIds: (process.env.TELEGRAM_CHAT_IDS || '').split(',').map((s) => s.trim()).filter(Boolean),
   /** Hora (0-23, Brasilia) do aviso diario de promocoes novas do ML. -1 desliga. */
   avisoPromocoesHora: Number(process.env.AVISO_PROMOCOES_HORA ?? 9),
+  /** v1.8.0: radar semanal de mercado do ML. Dia (0 = domingo, 1 = segunda) e hora (0-23, Brasilia); hora -1 desliga. */
+  radarMercadoDia: Number(process.env.RADAR_MERCADO_DIA ?? 1),
+  radarMercadoHora: Number(process.env.RADAR_MERCADO_HORA ?? 9),
   /** Endereco publico deste servico — usado pra registrar o webhook no Telegram. */
   baseUrl: semBarraFinal(process.env.BASE_URL || ''),
 };
